@@ -1,74 +1,93 @@
 package raft
 
-// change the raft server state and do something init
-func (rf *Raft) changeState(state int, resetTime bool) {
+import (
 
-	if state == FOLLOWER {
+	"math/rand"
+	"time"
+)
+
+// change the raft server state and do something init
+func (rf *Raft) targetState(target int, resetTime bool) {
+
+	if target == TO_FOLLOWER {
 		rf.state = FOLLOWER
 		rf.votedFor = -1
+		rf.getVoteNum = 0
 		rf.persist()
 		if resetTime {
-			rf.resetElectionTimer()
+			rf.electionTime = time.Now()
 		}
 	}
 
-	if state == LEADER {
+	if target == TO_CANDIDATE {
+		rf.state = CANDIDATE
+		rf.votedFor = rf.me
+		rf.getVoteNum = 1
+		rf.currentTerm ++
+		rf.persist()
+		rf.leaderElection()
+		rf.electionTime = time.Now()
+	}
+
+	if target == TO_LEADER {
 		rf.state = LEADER
 		rf.votedFor = -1
+		rf.getVoteNum = 0
 		rf.persist()
 
-		rf.nextIndex = make([]int, len(rf.peers))
-		for i := 0; i < len(rf.peers); i++ {
-			rf.nextIndex[i] = rf.getLastIndex() + 1
+		rf.nextIndex = make([]int,len(rf.peers))
+		for i:=0;i<len(rf.peers);i++ {
+			rf.nextIndex[i] = rf.getLastIndex()+1
 		}
-
-		rf.matchIndex = make([]int, len(rf.peers))
+		rf.matchIndex = make([]int,len(rf.peers))
 		rf.matchIndex[rf.me] = rf.getLastIndex()
-		rf.resetElectionTimer()
+		rf.electionTime = time.Now()
 	}
 }
 
-func (rf *Raft) printLogsForDebug() {
-	DPrintf("[PrintLog]Print server %d Logs, lastSSPindex %d", rf.me, rf.lastSnapShotIndex)
-	for index := 1; index < len(rf.log); index++ {
-		DPrintf("[Logs...]Index %d, command %v, term %d", index+rf.lastSnapShotIndex, rf.log[index].Command, rf.log[index].Term)
-	}
-
+func getRand(server int64) int{
+	rand.Seed(time.Now().Unix()+server)
+	return rand.Intn(ELECTION_TIMEOUT_MAX-ELECTION_TIMEOUT_MIN)+ELECTION_TIMEOUT_MIN
 }
 
-func (rf *Raft) getLogWithIndex(globalIndex int) Entry {
-
-	return rf.log[globalIndex-rf.lastSnapShotIndex]
+func (rf* Raft) UpToDate(index int, term int) bool {
+	lastIndex := rf.getLastIndex()
+	lastTerm := rf.getLastTerm()
+	return term > lastTerm || (term == lastTerm && index >= lastIndex)
 }
 
+func (rf* Raft) getLogWithIndex(globalIndex int) Entry{
 
-func (rf *Raft) getLastIndex() int {
-	return rf.lastSnapShotIndex + len(rf.log) - 1
+	return rf.log[globalIndex - rf.lastSnapShotIndex]
 }
 
-func (rf *Raft) getLastTerm() int {
-	if len(rf.log)-1 == 0 {
+func (rf* Raft) getLogTermWithIndex(globalIndex int) int{
+	if globalIndex - rf.lastSnapShotIndex == 0{
 		return rf.lastSnapShotTerm
-	} else {
+	}
+	return rf.log[globalIndex - rf.lastSnapShotIndex].Term
+}
+
+func (rf *Raft) getLastIndex() int{
+	return len(rf.log) - 1 + rf.lastSnapShotIndex
+}
+
+func (rf *Raft) getLastTerm() int{
+	if len(rf.log)-1 == 0{
+		return rf.lastSnapShotTerm
+	}else{
 		return rf.log[len(rf.log)-1].Term
 	}
 }
 
-func (rf *Raft) getPrevLogInfo(server int) (int, int) {
-	newEntryBeginIndex := rf.nextIndex[server] - 1
+func (rf *Raft) getPrevLogInfo(server int) (int,int){
+	newEntryBeginIndex := rf.nextIndex[server]-1
 	// TODO fix it in lab4
 	lastIndex := rf.getLastIndex()
 	if newEntryBeginIndex == lastIndex+1 {
 		newEntryBeginIndex = lastIndex
 	}
-	return newEntryBeginIndex, rf.getLogTermWithIndex(newEntryBeginIndex)
-}
-
-func (rf *Raft) getLogTermWithIndex(globalIndex int) int {
-	if globalIndex-rf.lastSnapShotIndex == 0 {
-		return rf.lastSnapShotTerm
-	}
-	return rf.log[globalIndex-rf.lastSnapShotIndex].Term
+	return newEntryBeginIndex ,rf.getLogTermWithIndex(newEntryBeginIndex)
 }
 
 // example code to send a RequestVote RPC to a server.

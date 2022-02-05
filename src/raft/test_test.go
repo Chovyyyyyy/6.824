@@ -638,6 +638,7 @@ func TestPersist22C(t *testing.T) {
 
 	index := 1
 	for iters := 0; iters < 5; iters++ {
+		DPrintf("[TEST2C New ITERS]%d ---------------",iters)
 		cfg.one(10+index, servers, true)
 		index++
 
@@ -658,8 +659,9 @@ func TestPersist22C(t *testing.T) {
 		cfg.connect((leader1 + 1) % servers)
 		cfg.connect((leader1 + 2) % servers)
 
+		DPrintf("--------------------Time.Sleep--------------------")
 		time.Sleep(RaftElectionTimeout)
-
+		DPrintf("--------------------Time.Sleep.Stop--------------------")
 		cfg.start1((leader1+3)%servers, cfg.applier)
 		cfg.connect((leader1 + 3) % servers)
 

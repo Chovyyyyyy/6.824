@@ -5,8 +5,8 @@ import (
 )
 
 func (rf *Raft) committedToAppliedTicker(){
-
-	for !rf.killed() {
+	// put the committed entry to apply on the state machine
+	for !rf.killed(){
 		time.Sleep(APPLIED_TIMEOUT*time.Millisecond)
 		rf.mu.Lock()
 
@@ -16,9 +16,7 @@ func (rf *Raft) committedToAppliedTicker(){
 		}
 
 		Messages := make([]ApplyMsg,0)
-
 		for rf.lastApplied < rf.commitIndex && rf.lastApplied < rf.getLastIndex() {
-
 			rf.lastApplied ++
 			Messages = append(Messages,ApplyMsg{
 				CommandValid: true,
@@ -36,12 +34,9 @@ func (rf *Raft) committedToAppliedTicker(){
 
 }
 
-// updateCommitIndex  更新日志提交Idx
-func (rf *Raft) updateCommitIndex(state int,leaderCommit int){
+func (rf *Raft) updateCommitIndex(role int,leaderCommit int){
 
-	// 如果不是leader，判断提交日志的Idx与leader的关系
-	if state != LEADER{
-		// 通过判断更新commitIdx
+	if role != LEADER{
 		if leaderCommit > rf.commitIndex {
 			lastNewIndex := rf.getLastIndex()
 			if leaderCommit >= lastNewIndex{
@@ -50,12 +45,10 @@ func (rf *Raft) updateCommitIndex(state int,leaderCommit int){
 				rf.commitIndex = leaderCommit
 			}
 		}
-		DPrintf("[CommitIndex] Follower %d commitIndex %d",rf.me,rf.commitIndex)
 		return
 	}
 
-	// 如果是leader，
-	if state == LEADER{
+	if role == LEADER{
 		rf.commitIndex = rf.lastSnapShotIndex
 		for index := rf.getLastIndex();index>=rf.lastSnapShotIndex+1;index--{
 			sum := 0
@@ -69,6 +62,7 @@ func (rf *Raft) updateCommitIndex(state int,leaderCommit int){
 				}
 			}
 
+			//log.Printf("lastSSP:%d, index: %d, commitIndex: %d, lastIndex: %d",rf.lastSnapShotIndex, index, rf.commitIndex, rf.getLastIndex())
 			if sum >= len(rf.peers)/2+1 && rf.getLogTermWithIndex(index)==rf.currentTerm {
 				rf.commitIndex = index
 				break

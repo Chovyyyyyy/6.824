@@ -1,18 +1,25 @@
 package kvraft
 
 import (
-	"6.824-golabs-2021/labgob"
-	"6.824-golabs-2021/labrpc"
-	"6.824-golabs-2021/raft"
+	//"2021_lab3/src/labgob"
+	//"2021_lab3/src/labrpc"
+	// original
+	"6.824/labgob"
+	"6.824/labrpc"
+	"6.824/raft"
+	"time"
+
+	// only for test
+	// "2021_lab3/src/raft"
 	"log"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 const (
 	Debug = false
-	CONSENSUS_TIMEOUT = 500 // ms
+	//Debug = true
+	CONSENSUS_TIMEOUT = 450 // ms
 )
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -43,15 +50,15 @@ type KVServer struct {
 	applyCh chan raft.ApplyMsg
 	dead    int32 // set by Kill()
 
-	maxraftstate int // snapshot if log grows this big
+	maxraftstate int
 
 	// Your definitions here.
 	kvDB map[string]string
-	waitApplyCh map[int]chan Op // index(raft) -> chan
-	lastRequestId map[int64]int // clientid -> requestID
+	waitApplyCh map[int]chan Op
+	lastRequestId map[int64]int
 
 	// last SnapShot point , raftIndex
-	lastSSPointRaftLogIndex int
+	lastSnapShotRaftLogIndex int
 }
 
 func (kv *KVServer) DprintfKVDB(){
@@ -73,8 +80,8 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		return
 	}
 
-	_, ifLeader := kv.rf.GetState()
-	if !ifLeader {
+	_, isLeader := kv.rf.GetState()
+	if !isLeader {
 		reply.Err = ErrWrongLeader
 		return
 	}
@@ -82,9 +89,6 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	op := Op{Operation: "get", Key: args.Key, Value: "", ClientId: args.ClientId, RequestId: args.RequestId}
 
 	raftIndex, _, _ := kv.rf.Start(op)
-	DPrintf("[GET StartToRaft]From Client %d (Request %d) To Server %d, key %v, raftIndex %d",args.ClientId,args.RequestId, kv.me, op.Key, raftIndex)
-
-	// 对应raft节点的waitApplyCh
 	kv.mu.Lock()
 	chForRaftIndex, exist := kv.waitApplyCh[raftIndex]
 	if !exist {
@@ -92,13 +96,11 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		chForRaftIndex = kv.waitApplyCh[raftIndex]
 	}
 	kv.mu.Unlock()
+	// timeout
 	select {
-	// 超时
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT) :
-		DPrintf("[GET TIMEOUT!!!]From Client %d (Request %d) To Server %d, key %v, raftIndex %d",args.ClientId,args.RequestId, kv.me, op.Key, raftIndex)
-
-		_,isLeader := kv.rf.GetState()
-		if kv.ifRequestDuplicate(op.ClientId, op.RequestId) && isLeader{
+		_,ifLeader := kv.rf.GetState()
+		if kv.isRequestDuplicate(op.ClientId, op.RequestId) && ifLeader{
 			value, exist := kv.ExecuteGetOpOnKVDB(op)
 			if exist {
 				reply.Err = OK
@@ -110,22 +112,20 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 		} else {
 			reply.Err = ErrWrongLeader
 		}
-	// 收到了channel的恢复
-	case raftCommitOp := <-chForRaftIndex:
-		DPrintf("[WaitChanGetRaftApplyMessage<--]Server %d , get Command <-- Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v",kv.me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
-		if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId  {
-			value, exist := kv.ExecuteGetOpOnKVDB(op)
-			if exist {
-				reply.Err = OK
-				reply.Value = value
-			} else {
-				reply.Err = ErrNoKey
-				reply.Value = ""
+
+		case raftCommitOp := <-chForRaftIndex:
+			if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId  {
+				value, exist := kv.ExecuteGetOpOnKVDB(op)
+				if exist {
+					reply.Err = OK
+					reply.Value = value
+				} else {
+					reply.Err = ErrNoKey
+					reply.Value = ""
+				}
+			} else{
+				reply.Err = ErrWrongLeader
 			}
-		} else{
-			// 这说明我们请求的raft节点中途状态出现变更，需要重新请求
-			reply.Err = ErrWrongLeader
-		}
 
 	}
 
@@ -145,15 +145,12 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	_, ifLeader := kv.rf.GetState()
 	if !ifLeader {
 		reply.Err = ErrWrongLeader
-
 		return
 	}
 
 	op := Op{Operation: args.Opreation, Key: args.Key, Value: args.Value, ClientId: args.ClientId, RequestId: args.RequestId}
 
 	raftIndex, _, _ := kv.rf.Start(op)
-	DPrintf("[PutAppend StartToRaft]From Client %d (Request %d) To Server %d, key %v, raftIndex %d",args.ClientId,args.RequestId, kv.me, op.Key, raftIndex)
-
 	// create waitForCh
 	kv.mu.Lock()
 	chForRaftIndex, exist := kv.waitApplyCh[raftIndex]
@@ -164,21 +161,19 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	kv.mu.Unlock()
 
 	select {
-	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT) :
-		DPrintf("[TIMEOUT PutAppend !!!!]Server %d , get Command <-- Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v",kv.me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
-		if kv.ifRequestDuplicate(op.ClientId,op.RequestId){
-			reply.Err = OK
-		} else{
-			reply.Err = ErrWrongLeader
-		}
+		case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT) :
+			if kv.isRequestDuplicate(op.ClientId,op.RequestId){
+				reply.Err = OK
+			} else{
+				reply.Err = ErrWrongLeader
+			}
 
-	case raftCommitOp := <- chForRaftIndex :
-		DPrintf("[WaitChanGetRaftApplyMessage<--]Server %d , get Command <-- Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v",kv.me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
-		if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId  {
-			reply.Err = OK
-		}else{
-			reply.Err = ErrWrongLeader
-		}
+		case raftCommitOp := <- chForRaftIndex :
+			if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId  {
+				reply.Err = OK
+			}else{
+				reply.Err = ErrWrongLeader
+			}
 
 	}
 	kv.mu.Lock()
@@ -224,7 +219,6 @@ func (kv *KVServer) killed() bool {
 // for any long-running work.
 //
 func StartKVServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister, maxraftstate int) *KVServer {
-	DPrintf("[InitKVServer---]Server %d",me)
 	// call labgob.Register on structures you want
 	// Go's RPC library to marshall/unmarshall.
 	labgob.Register(Op{})

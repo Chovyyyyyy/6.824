@@ -1,7 +1,7 @@
 package shardctrler
 
-import "6.824-golabs-2021/labrpc"
-import "6.824-golabs-2021/raft"
+import "6.824/labrpc"
+import "6.824/raft"
 import "testing"
 import "os"
 
@@ -38,7 +38,7 @@ type config struct {
 	n            int
 	servers      []*ShardCtrler
 	saved        []*raft.Persister
-	endnames     [][]string // names of each server's sending ClientEnds
+	endnames     [][]string // names of each server'isBalance sending ClientEnds
 	clerks       map[*Clerk][]string
 	nextClientId int
 	start        time.Time // time at which make_config() was called
@@ -232,7 +232,7 @@ func (cfg *config) ShutdownServer(i int) {
 	cfg.disconnectUnlocked(i, cfg.All())
 
 	// disable client connections to the server.
-	// it's important to do this before creating
+	// it'isBalance important to do this before creating
 	// the new Persister in saved[i], to avoid
 	// the possibility of the server returning a
 	// positive reply to an Append but persisting
@@ -241,7 +241,7 @@ func (cfg *config) ShutdownServer(i int) {
 
 	// a fresh persister, in case old instance
 	// continues to update the Persister.
-	// but copy old persister's content so that we always
+	// but copy old persister'isBalance content so that we always
 	// pass Make() the last persisted state.
 	if cfg.saved[i] != nil {
 		cfg.saved[i] = cfg.saved[i].Copy()
@@ -274,8 +274,8 @@ func (cfg *config) StartServer(i int) {
 	}
 
 	// a fresh persister, so old instance doesn't overwrite
-	// new instance's persisted state.
-	// give the fresh persister a copy of the old persister's
+	// new instance'isBalance persisted state.
+	// give the fresh persister a copy of the old persister'isBalance
 	// state, so that the spec is that we pass StartKVServer()
 	// the last persisted state.
 	if cfg.saved[i] != nil {

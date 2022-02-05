@@ -8,11 +8,9 @@ package raft
 // test with the original before submitting.
 //
 
-import (
-	"6.824-golabs-2021/labgob"
-	"6.824-golabs-2021/labrpc"
-	"bytes"
-)
+import "6.824/labgob"
+import "6.824/labrpc"
+import "bytes"
 import "log"
 import "sync"
 import "testing"
@@ -305,7 +303,7 @@ func (cfg *config) cleanup() {
 
 // attach server i to the net.
 func (cfg *config) connect(i int) {
-	//fmt.Println("[FuckingReConnect]connect(%d)\n", i)
+	 //fmt.Println("[FuckingReConnect]connect(%d)\n", i)
 	DPrintf("[FuckingReConnect]connect(%d)",i)
 	cfg.connected[i] = true
 
@@ -328,7 +326,7 @@ func (cfg *config) connect(i int) {
 
 // detach server i from the net.
 func (cfg *config) disconnect(i int) {
-	//fmt.Printf("[FuckingDisconnet]disconnect(%d)\n", i)
+	 //fmt.Printf("[FuckingDisconnet]disconnect(%d)\n", i)
 	DPrintf("[FuckingDisconnet]disconnect(%d)",i)
 	cfg.connected[i] = false
 

@@ -1,9 +1,5 @@
 package raft
 
-import (
-	"sync"
-)
-
 //
 // support for Raft and kvraft to save persistent
 // Raft state (log &c) and k/v server snapshots.
@@ -12,6 +8,8 @@ import (
 // so, while you can modify this code to help you debug, please
 // test with the original before submitting.
 //
+
+import "sync"
 
 type Persister struct {
 	mu        sync.Mutex
@@ -56,8 +54,7 @@ func (ps *Persister) RaftStateSize() int {
 	return len(ps.raftstate)
 }
 
-// Save both Raft state and K/V snapshot as a single atomic action,
-// to help avoid them getting out of sync.
+
 func (ps *Persister) SaveStateAndSnapshot(state []byte, snapshot []byte) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
@@ -65,7 +62,6 @@ func (ps *Persister) SaveStateAndSnapshot(state []byte, snapshot []byte) {
 	ps.snapshot = clone(snapshot)
 }
 
-// ReadSnapshot 在磁盘中读取快照
 func (ps *Persister) ReadSnapshot() []byte {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
@@ -77,4 +73,3 @@ func (ps *Persister) SnapshotSize() int {
 	defer ps.mu.Unlock()
 	return len(ps.snapshot)
 }
-

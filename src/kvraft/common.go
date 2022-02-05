@@ -4,6 +4,7 @@ const (
 	OK             = "OK"
 	ErrNoKey       = "ErrNoKey"
 	ErrWrongLeader = "ErrWrongLeader"
+	// ErrWrongConsensus = "ErrWrongConsensus"
 	ErrServerKilled = "ErrServerKilled"
 )
 
@@ -23,6 +24,7 @@ type PutAppendArgs struct {
 
 type PutAppendReply struct {
 	Err Err
+	// LeaderId int
 }
 
 type GetArgs struct {
@@ -34,5 +36,6 @@ type GetArgs struct {
 
 type GetReply struct {
 	Err   Err
+	// LeaderId int
 	Value string
 }

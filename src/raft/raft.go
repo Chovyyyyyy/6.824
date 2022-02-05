@@ -18,13 +18,12 @@ package raft
 //
 
 import (
+	"6.824/labrpc"
 	"sync"
+	//	"bytes"
+	"sync/atomic"
 	"time"
 )
-import "sync/atomic"
-import "6.824-golabs-2021/labrpc"
-
-// import "bytes"
 
 //
 // as each Raft peer becomes aware that successive log entries are
@@ -33,10 +32,11 @@ import "6.824-golabs-2021/labrpc"
 // CommandValid to true to indicate that the ApplyMsg contains a newly
 // committed log entry.
 //
-// in Lab 3 you'll want to send other kinds of messages (e.g.,
-// snapshots) on the applyCh; at that point you can add fields to
-// ApplyMsg, but set CommandValid to false for these other uses.
+// in part 2D you'll want to send other kinds of messages (e.g.,
+// snapshots) on the applyCh, but set CommandValid to false for these
+// other uses.
 //
+
 type ApplyMsg struct {
 	// 如果是日志就设置为true
 	// 在lab3中会有其他类型消息，设置为false
@@ -55,7 +55,14 @@ const (
 	FOLLOWER     = 0
 	CANDIDATE    = 1
 	LEADER       = 2
-	APPLIED_TIMEOUT = 28
+	TO_FOLLOWER  = 0
+	TO_CANDIDATE = 1
+	TO_LEADER    = 2
+
+	ELECTION_TIMEOUT_MAX = 250
+	ELECTION_TIMEOUT_MIN = 150
+	HEARTBEAT            = 40
+	APPLIED_TIMEOUT      = 28
 )
 
 type Raft struct {
@@ -65,26 +72,24 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
-	state        int
-	heartBeat    time.Duration
-	electionTime time.Time
-
 	// 持久性状态
 	currentTerm int     // 最新任期
 	votedFor    int     // 获得选票的候选人Id
 	log         []Entry // 日志条目
+	getVoteNum  int
 
 	//所有server易失性状态
 	commitIndex int // 被提交的最高日志索引
 	lastApplied int // 已应用于状态机的最高日志条目索引
 
+	state        int
+	electionTime time.Time
+
 	//leader的易失性状态
 	nextIndex  []int // 对于每个server，要发送给该server的下一个日志的索引（leader的最后一个日志索引+1）
 	matchIndex []int // 对于每个server，在服务器上复制的最新日志的索引
 
-	applyCh   chan ApplyMsg
-	applyCond *sync.Cond
-
+	applyCh chan ApplyMsg
 	// SnapShot
 	lastSnapShotIndex int
 	lastSnapShotTerm  int
@@ -95,6 +100,11 @@ type Entry struct {
 	Command interface{}
 }
 
+func (rf *Raft) GetState() (int, bool) {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	return rf.currentTerm, rf.state == LEADER
+}
 
 //
 // the service using Raft (e.g. a k/v server) wants to start
@@ -111,25 +121,22 @@ type Entry struct {
 // the leader.
 //
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
-
 	// Your code here (2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
+	if rf.killed() {
+		return -1, -1, false
+	}
 	if rf.state != LEADER {
-		return -1, rf.currentTerm, false
+		return -1, -1, false
+	} else {
+		index := rf.getLastIndex() + 1
+		term := rf.currentTerm
+		rf.log = append(rf.log, Entry{Term: term, Command: command})
+		DPrintf("[StartCommand] Leader %d get command %v,index %d", rf.me, command, index)
+		rf.persist()
+		return index, term, true
 	}
-	index := rf.getLastIndex() + 1
-	term := rf.currentTerm
-	log := Entry{
-		Command: command,
-		Term:    term,
-	}
-	rf.log = append(rf.log, log)
-	DPrintf("[%v]: term %v Start %v", rf.me, term, log)
-	rf.persist()
-	return index, term, true
-
 }
 
 //
@@ -167,41 +174,41 @@ func (rf *Raft) killed() bool {
 
 func Make(peers []*labrpc.ClientEnd, me int,
 	persister *Persister, applyCh chan ApplyMsg) *Raft {
-
 	rf := &Raft{}
 	rf.peers = peers
 	rf.persister = persister
 	rf.me = me
 
 	// Your initialization code here (2A, 2B, 2C).
+	rf.mu.Lock()
 	rf.state = FOLLOWER
 	rf.currentTerm = 0
+	rf.getVoteNum = 0
 	rf.votedFor = -1
-	//rf.heartBeat = 50 * time.Millisecond
-	rf.heartBeat = 27 * time.Millisecond
+
 
 	rf.lastApplied = 0
 	rf.commitIndex = 0
-	rf.nextIndex = make([]int, len(rf.peers))
-	rf.matchIndex = make([]int, len(rf.peers))
+
 	rf.log = []Entry{}
 	rf.log = append(rf.log, Entry{})
 
 	rf.applyCh = applyCh
-	rf.applyCond = sync.NewCond(&rf.mu)
-	// snapshot
+
 	rf.lastSnapShotIndex = 0
 	rf.lastSnapShotTerm = 0
+	rf.mu.Unlock()
 
+	// 从崩溃前的持久化状态进行恢复
 	rf.readPersist(persister.ReadRaftState())
 	if rf.lastSnapShotIndex > 0 {
 		rf.lastApplied = rf.lastSnapShotIndex
 	}
 
-	DPrintf("[Init&ReInit] Sever %d, term %d, lastSnapShotIndex %d , term %d", rf.me, rf.currentTerm, rf.lastSnapShotIndex, rf.lastSnapShotTerm)
+	// 使用goroutine进行leader选举和发送心跳包
+	go rf.leaderElectionTicker()
 
-	// 使用goroutine进行leader选举
-	go rf.ticker()
+	go rf.heartBeatTicker()
 
 	go rf.committedToAppliedTicker()
 

@@ -1,10 +1,28 @@
 package shardctrler
 
 import (
-	"6.824-golabs-2021/raft"
+	"6.824/raft"
 )
+//
+// Shard controler: assigns shards to replication groups.
+//
+// RPC interface:
+// Join(servers) -- add a set of groups (gid -> server-list mapping).
+// Leave(gids) -- delete a set of groups.
+// Move(shard, gid) -- hand off one shard from current owner to gid.
+// Query(num) -> fetch Config # num, or latest config if num==-1.
+//
+// A Config (configuration) describes a set of replica groups, and the
+// replica group responsible for each shard. Configs are numbered. Config
+// #0 is the initial configuration, with no groups and all shards
+// assigned to group 0 (the invalid group).
+//
+// You will need to add fields to the RPC argument structs.
+//
 
-func (sc *ShardCtrler) ReadRaftApplyCommandLoop() {
+
+
+func (sc *ShardCtrler) ReadRaftApplyCommandLoop(){
 	for message := range sc.applyCh {
 		if message.CommandValid {
 			sc.GetCommandFromRaft(message)
@@ -15,12 +33,13 @@ func (sc *ShardCtrler) ReadRaftApplyCommandLoop() {
 	}
 }
 
-func (sc *ShardCtrler) GetCommandFromRaft(message raft.ApplyMsg )  {
+func (sc *ShardCtrler) GetCommandFromRaft(message raft.ApplyMsg){
 	op := message.Command.(Op)
+
 	if message.CommandIndex <= sc.lastSnapShotRaftLogIndex {
 		return
 	}
-	if !sc.isRequestDuplicate(op.ClientId,op.RequestId) {
+	if !sc.isRequestDuplicate(op.ClientId, op.RequestId){
 		if op.Operation == JoinOp {
 			sc.ExecJoinOnController(op)
 		}
@@ -32,96 +51,57 @@ func (sc *ShardCtrler) GetCommandFromRaft(message raft.ApplyMsg )  {
 		}
 	}
 
-	if sc.maxRaftState != -1 {
-		sc.IsNeedToSendSnapShotCommand(message.CommandIndex,9)
+	if sc.maxraftstate != -1{
+		sc.IfNeedToSendSnapShotCommand(message.CommandIndex,9)
 	}
 
-	sc.SendMessageToWaitChan(op,message.CommandIndex)
+	sc.SendMessageToWaitChan(op, message.CommandIndex)
 }
 
-func (sc *ShardCtrler) SendMessageToWaitChan(op Op,raftIdx int) bool {
+func (sc *ShardCtrler) SendMessageToWaitChan(op Op, raftIndex int) bool{
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	ch, exist := sc.waitApplyCh[raftIdx]
+	ch, exist := sc.waitApplyCh[raftIndex]
 	if exist {
 		ch <- op
 	}
 	return exist
 }
 
-func (sc *ShardCtrler) InitNewConfig() Config {
+func (sc *ShardCtrler) InitNewConfig()Config{
 	var tempConfig Config
 	if len(sc.configs) == 1 {
-		tempConfig = Config{Num: 1,Shards: [10]int{},Groups: map[int][]string{}}
+		tempConfig = Config{Num:1, Shards: [10]int{}, Groups: map[int][]string{}}
 	} else {
 		newestConfig := sc.configs[len(sc.configs)-1]
-		tempConfig = Config{
-			Num: newestConfig.Num+1,
-			Shards: [10]int{},
-			Groups: map[int][]string{},
+		tempConfig = Config{Num:newestConfig.Num+1, Shards: [10]int{}, Groups: map[int][]string{}}
+		for index, gid := range newestConfig.Shards {
+			tempConfig.Shards[index] = gid
 		}
-		for idx, gid := range newestConfig.Shards {
-			tempConfig.Shards[idx] = gid
-		}
-		for gid,groups := range newestConfig.Groups {
+		for gid, groups := range newestConfig.Groups {
 			tempConfig.Groups[gid] = groups
 		}
 	}
 	return tempConfig
 }
 
-func (sc *ShardCtrler) ExecQueryOnController(op Op) Config {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.lastRequestId[op.ClientId] = op.RequestId
-	if op.QueryNumber == -1 || op.QueryNumber >= len(sc.configs) {
-		return sc.configs[len(sc.configs) - 1]
-	} else {
-		return sc.configs[op.QueryNumber]
+
+func ShowConfig(config Config, op string){
+	DPrintf("=========== Config For op %v", op)
+	DPrintf("[ConfigNum]%d",config.Num)
+	for index, value := range config.Shards {
+		DPrintf("[shards]Shard %d --> gid %d", index,value)
+	}
+	for gid,servers := range config.Groups {
+		DPrintf("[Groups]Gid %d --> servers %v", gid, servers)
 	}
 }
-
-func (sc *ShardCtrler) ExecJoinOnController(op Op) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.lastRequestId[op.ClientId] = op.RequestId
-	sc.configs = append(sc.configs,*sc.MakeJoinConfig(op.ServersJoin))
-}
-
-func (sc *ShardCtrler)ExecLeaveOnController(op Op) {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-	sc.lastRequestId[op.ClientId] = op.RequestId
-	sc.configs = append(sc.configs,*sc.MakeLeaveConfig(op.GidsLeave))
-}
-
-func (sc *ShardCtrler) ExecMoveOnController(op Op) {
-	sc.mu.Lock()
-	//DPrintf("[Exec]Server %d, MOVE, ClientId %d, RequestId %d",sc.me, op.ClientId,op.RequestId)
-	sc.lastRequestId[op.ClientId] = op.RequestId
-	sc.configs = append(sc.configs,*sc.MakeMoveConfig(op.ShardMove,op.GidMove))
-	sc.mu.Unlock()
-}
-
-func (sc *ShardCtrler) isRequestDuplicate(newClientId int64, newRequestId int) bool {
-	sc.mu.Lock()
-	defer sc.mu.Unlock()
-
-	lastRequestId, isClientRecord := sc.lastRequestId[newClientId]
-	if !isClientRecord {
-		return false
-	}
-	return newRequestId <= lastRequestId
-}
-
 
 func (sc *ShardCtrler) BalanceShardToGid(config *Config){
 	length := len(config.Groups)
 	average := NShards/length
 	subNum := NShards - average*length
 	avgNum := length - subNum
-	// len(config.Groups) - subNum --> average
-	// subNum --> average+1
 
 	zeroAimGid := 0
 	for gid,_ := range config.Groups {
@@ -137,7 +117,6 @@ func (sc *ShardCtrler) BalanceShardToGid(config *Config){
 		}
 	}
 
-	// count Every Gid mangement which Shard ???
 	countArray := make(map[int][]int)
 	for shardIndex,gid := range config.Shards {
 		if _, exist := countArray[gid];exist {
@@ -153,9 +132,8 @@ func (sc *ShardCtrler) BalanceShardToGid(config *Config){
 		}
 	}
 
-
 	for {
-		if ifBalance(average,avgNum,subNum,countArray){
+		if isBalance(average,avgNum,subNum,countArray){
 			break
 		}
 		// make Max Gid One Shard to Min Gid
@@ -178,7 +156,6 @@ func (sc *ShardCtrler) BalanceShardToGid(config *Config){
 		movedShard := countArray[maxGid][maxShardsNum-1]
 		toGid := minGid
 
-		//DPrintf("[Blance]Shard %d from Gid %d ===> Gid %d",movedShard, fromGid,toGid)
 		countArray[fromGid] = countArray[fromGid][:maxShardsNum-1]
 		countArray[toGid] = append(countArray[toGid], movedShard)
 		config.Shards[movedShard] = toGid
@@ -186,7 +163,7 @@ func (sc *ShardCtrler) BalanceShardToGid(config *Config){
 
 }
 
-func ifBalance(average int, avgNum int, subNum int, countArray map[int][]int) bool{
+func isBalance(average int, avgNum int, subNum int, countArray map[int][]int) bool{
 	shouldAvg := 0
 	shouldAvgPlus := 0
 	for gid, shards := range countArray {
@@ -200,3 +177,51 @@ func ifBalance(average int, avgNum int, subNum int, countArray map[int][]int) bo
 
 	return shouldAvg == avgNum && shouldAvgPlus == subNum
 }
+
+func (sc *ShardCtrler) ExecQueryOnController(op Op) Config {
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	sc.lastRequestId[op.ClientId] = op.RequestId
+	if op.NumQuery == -1 || op.NumQuery >= len(sc.configs){
+		return sc.configs[len(sc.configs) - 1]
+	} else {
+		return sc.configs[op.NumQuery]
+	}
+
+}
+
+func (sc *ShardCtrler) ExecJoinOnController(op Op) {
+	sc.mu.Lock()
+	sc.lastRequestId[op.ClientId] = op.RequestId
+	sc.configs = append(sc.configs,*sc.MakeJoinConfig(op.ServersJoin))
+	sc.mu.Unlock()
+}
+
+func (sc *ShardCtrler) ExecLeaveOnController(op Op) {
+	sc.mu.Lock()
+	sc.lastRequestId[op.ClientId] = op.RequestId
+	sc.configs = append(sc.configs,*sc.MakeLeaveConfig(op.GidsLeave))
+	sc.mu.Unlock()
+}
+
+func (sc *ShardCtrler) ExecMoveOnController(op Op) {
+	sc.mu.Lock()
+	sc.lastRequestId[op.ClientId] = op.RequestId
+	sc.configs = append(sc.configs,*sc.MakeMoveConfig(op.ShardMove,op.GidMove))
+	sc.mu.Unlock()
+}
+
+
+func (sc *ShardCtrler) isRequestDuplicate(newClientId int64, newRequestId int) bool{
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	// return true if message is duplicate
+	lastRequestId, ifClientInRecord := sc.lastRequestId[newClientId]
+	if !ifClientInRecord {
+		// kv.lastRequestId[newClientId] = newRequestId
+		return false
+	}
+	return newRequestId <= lastRequestId
+}
+
+

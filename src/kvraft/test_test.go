@@ -1,7 +1,10 @@
 package kvraft
 
-import "6.824-golabs-2021/porcupine"
-import "6.824-golabs-2021/models"
+import (
+	"6.824/porcupine"
+	//"log"
+)
+import "6.824/models"
 import "testing"
 import "strconv"
 import "time"
@@ -174,6 +177,7 @@ func checkConcurrentAppends(t *testing.T, v string, counts []int) {
 
 // repartition the servers periodically
 func partitioner(t *testing.T, cfg *config, ch chan bool, done *int32) {
+	DPrintf("[!!!!!!!!!--FUCKing Partitioner--------]")
 	defer func() { ch <- true }()
 	for atomic.LoadInt32(done) == 0 {
 		a := make([]int, cfg.n)
@@ -253,6 +257,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		go spawn_clients_and_wait(t, cfg, nclients, func(cli int, myck *Clerk, t *testing.T) {
 			j := 0
 			defer func() {
+				// log.Printf("clnts chan get info, client %d, j: %d",cli,j)
 				clnts[cli] <- j
 			}()
 			last := "" // only used when not randomkeys
@@ -260,6 +265,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				Put(cfg, myck, strconv.Itoa(cli), last, opLog, cli)
 			}
 			for atomic.LoadInt32(&done_clients) == 0 {
+				//fmt.Println("------One Loop-----------")
 				var key string
 				if randomkeys {
 					key = strconv.Itoa(rand.Intn(nclients))
@@ -268,7 +274,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				}
 				nv := "x " + strconv.Itoa(cli) + " " + strconv.Itoa(j) + " y"
 				if (rand.Int() % 1000) < 500 {
-					// log.Printf("%d: client new append %v\n", cli, nv)
+					//log.Printf("%d: client new append %v\n", cli, nv)
 					Append(cfg, myck, key, nv, opLog, cli)
 					if !randomkeys {
 						last = NextValue(last, nv)
@@ -277,10 +283,11 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				} else if randomkeys && (rand.Int()%1000) < 100 {
 					// we only do this when using random keys, because it would break the
 					// check done after Get() operations
+					//log.Printf("%d: client new put %v\n", cli, nv)
 					Put(cfg, myck, key, nv, opLog, cli)
 					j++
 				} else {
-					// log.Printf("%d: client new get %v\n", cli, key)
+					//log.Printf("%d: client new get %v\n", cli, key)
 					v := Get(cfg, myck, key, opLog, cli)
 					// the following check only makes sense when we're not using random keys
 					if !randomkeys && v != last {
@@ -297,10 +304,12 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 		}
 		time.Sleep(5 * time.Second)
 
+
 		atomic.StoreInt32(&done_clients, 1)     // tell clients to quit
 		atomic.StoreInt32(&done_partitioner, 1) // tell partitioner to quit
 
 		if partitions {
+			//fmt.Println("[Fucking Wait for Partitions ------------------- 1]")
 			// log.Printf("wait for partitioner\n")
 			<-ch_partitioner
 			// reconnect network and submit a request. A client may
@@ -328,14 +337,16 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 			cfg.ConnectAll()
 		}
 
+		//fmt.Println("[Fucking Wait for Clinet ------------------- ]")
 		// log.Printf("wait for clients\n")
 		for i := 0; i < nclients; i++ {
 			// log.Printf("read from clients %d\n", i)
 			j := <-clnts[i]
-			// if j < 10 {
-			// 	log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
-			// }
+			//if j < 10 {
+			//log.Printf("Warning: client %d managed to perform only %d put operations in 1 sec?\n", i, j)
+			//}
 			key := strconv.Itoa(i)
+
 			// log.Printf("Check %v for client %d\n", j, i)
 			v := Get(cfg, ck, key, opLog, 0)
 			if !randomkeys {
@@ -343,6 +354,7 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 			}
 		}
 
+		//fmt.Println("[Fucking Fnishing  this ------------------- 1]")
 		if maxraftstate > 0 {
 			// Check maximum after the servers have processed all client
 			// requests and had time to checkpoint.
@@ -358,7 +370,10 @@ func GenericTest(t *testing.T, part string, nclients int, nservers int, unreliab
 				t.Fatalf("snapshot too large (%v), should not be used when maxraftstate = %d", ssz, maxraftstate)
 			}
 		}
+		//fmt.Println("Fucing stop the loop once---------------")
 	}
+
+	//fmt.Println("[Fucking Wait for this ------------------- 1]")
 
 	res, info := porcupine.CheckOperationsVerbose(models.KvModel, opLog.Read(), linearizabilityCheckTimeout)
 	if res == porcupine.Illegal {

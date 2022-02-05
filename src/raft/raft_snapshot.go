@@ -1,15 +1,16 @@
 package raft
 
-// InstallSnapshotArgs 快照请求
+import "time"
+
 type InstallSnapshotArgs struct{
 	Term int
 	LeaderId int
 	LastIncludeIndex int
 	LastIncludeTerm int
 	Data[] byte
+	//Done bool
 }
 
-// InstallSnapshotReply 快照回复
 type InstallSnapshotReply struct {
 	Term int
 }
@@ -36,7 +37,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if rf.lastSnapShotIndex >= index || index > rf.commitIndex{
 		return
 	}
-	// snapshot the entrier form 1:index(global)
 	tempLog := make([]Entry,0)
 	tempLog = append(tempLog,Entry{})
 
@@ -44,7 +44,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 		tempLog = append(tempLog,rf.getLogWithIndex(i))
 	}
 
-	// TODO fix it in lab 4
 	if index == rf.getLastIndex()+1 {
 		rf.lastSnapShotTerm = rf.getLastTerm()
 	}else {
@@ -60,8 +59,6 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	if index > rf.lastApplied{
 		rf.lastApplied = index
 	}
-	DPrintf("[SnapShot]Server %d sanpshot until index %d, term %d, loglen %d",rf.me,index,rf.lastSnapShotTerm,len(rf.log)-1)
-	// 持久化保存快照
 	rf.persister.SaveStateAndSnapshot(rf.persistData(),snapshot)
 }
 
@@ -77,14 +74,13 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.currentTerm = args.Term
 	reply.Term = args.Term
 	if rf.state != FOLLOWER {
-		rf.changeState(FOLLOWER,true)
+		rf.targetState(TO_FOLLOWER,true)
 	}else{
-		rf.resetElectionTimer()
+		rf.electionTime = time.Now()
 		rf.persist()
 	}
 
 	if rf.lastSnapShotIndex >= args.LastIncludeIndex{
-		DPrintf("[HaveSnapShot] sever %d , lastSnapShotIndex %d, leader's lastIncludeIndex %d",rf.me,rf.lastSnapShotIndex,args.LastIncludeIndex)
 		rf.mu.Unlock()
 		return
 	}
@@ -99,8 +95,8 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.lastSnapShotTerm = args.LastIncludeTerm
 	rf.lastSnapShotIndex = args.LastIncludeIndex
-
 	rf.log = tempLog
+
 	if index > rf.commitIndex{
 		rf.commitIndex = index
 	}
@@ -118,50 +114,40 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	rf.mu.Unlock()
 
 	rf.applyCh <- msg
-	DPrintf("[FollowerInstallSnapShot]server %d installsnapshot from leader %d, index %d",rf.me,args.LeaderId,args.LastIncludeIndex)
 
 }
 
 
-// leaderSendSnapShot leader发送快照
 func (rf *Raft) leaderSendSnapShot(server int){
 	rf.mu.Lock()
-	DPrintf("[LeaderSendSnapShot]Leader %d (term %d) send snapshot to server %d, index %d",rf.me,rf.currentTerm,server,rf.lastSnapShotIndex)
-	// 构造args
-	ssArgs := InstallSnapshotArgs{
+	args := InstallSnapshotArgs{
 		rf.currentTerm,
 		rf.me,
 		rf.lastSnapShotIndex,
 		rf.lastSnapShotTerm,
 		rf.persister.ReadSnapshot(),
 	}
-	ssReply := InstallSnapshotReply{}
+	reply := InstallSnapshotReply{}
 	rf.mu.Unlock()
 
-	// 通过rpc发送快照
-	ok := rf.sendSnapShot(server,&ssArgs,&ssReply)
+	ok := rf.sendSnapShot(server,&args,&reply)
 
-	// 如果接收不到reply
-	if !ok {
-		DPrintf("[InstallSnapShot ERROR] Leader %d can't receive from %d",rf.me,server)
-	}
 	if ok {
 		rf.mu.Lock()
-		if rf.state!=LEADER || rf.currentTerm!=ssArgs.Term{
+		if rf.state!=LEADER || rf.currentTerm!= args.Term{
 			rf.mu.Unlock()
 			return
 		}
-		// 说明leader落后了，可能是因为宕机
-		if ssReply.Term > rf.currentTerm{
-			rf.changeState(FOLLOWER,true)
+		if reply.Term > rf.currentTerm{
+			rf.targetState(FOLLOWER,true)
 			rf.mu.Unlock()
 			return
 		}
 
-		DPrintf("[InstallSnapShot SUCCESS] Leader %d from sever %d",rf.me,server)
-		rf.nextIndex[server] = ssArgs.LastIncludeIndex + 1
-		rf.matchIndex[server] = ssArgs.LastIncludeIndex
+		rf.matchIndex[server] = args.LastIncludeIndex
+		rf.nextIndex[server] = args.LastIncludeIndex + 1
 		rf.mu.Unlock()
 		return
 	}
 }
+

@@ -58,6 +58,8 @@ func check_same_config(t *testing.T, c1 Config, c2 Config) {
 		t.Fatalf("Num wrong")
 	}
 	if c1.Shards != c2.Shards {
+		ShowConfig(c1,JoinOp)
+		ShowConfig(c2,JoinOp)
 		t.Fatalf("Shards wrong")
 	}
 	if len(c1.Groups) != len(c2.Groups) {
@@ -194,8 +196,8 @@ func TestBasic(t *testing.T) {
 		go func(i int) {
 			defer func() { ch <- true }()
 			var gid int = gids[i]
-			var sid1 = fmt.Sprintf("s%da", gid)
-			var sid2 = fmt.Sprintf("s%db", gid)
+			var sid1 = fmt.Sprintf("isBalance%da", gid)
+			var sid2 = fmt.Sprintf("isBalance%db", gid)
 			cka[i].Join(map[int][]string{gid + 1000: []string{sid1}})
 			cka[i].Join(map[int][]string{gid: []string{sid2}})
 			cka[i].Leave([]int{gid + 1000})
@@ -223,7 +225,7 @@ func TestBasic(t *testing.T) {
 		for j := 0; j < len(c1.Shards); j++ {
 			if c2.Shards[j] == i {
 				if c1.Shards[j] != i {
-					t.Fatalf("non-minimal transfer after Join()s")
+					t.Fatalf("non-minimal transfer after Join()isBalance")
 				}
 			}
 		}
@@ -241,7 +243,7 @@ func TestBasic(t *testing.T) {
 		for j := 0; j < len(c1.Shards); j++ {
 			if c2.Shards[j] == i {
 				if c3.Shards[j] != i {
-					t.Fatalf("non-minimal transfer after Leave()s")
+					t.Fatalf("non-minimal transfer after Leave()isBalance")
 				}
 			}
 		}
@@ -351,7 +353,7 @@ func TestMulti(t *testing.T) {
 		for j := 0; j < len(c1.Shards); j++ {
 			if c2.Shards[j] == i {
 				if c1.Shards[j] != i {
-					t.Fatalf("non-minimal transfer after Join()s")
+					t.Fatalf("non-minimal transfer after Join()isBalance")
 				}
 			}
 		}
@@ -371,7 +373,7 @@ func TestMulti(t *testing.T) {
 		for j := 0; j < len(c1.Shards); j++ {
 			if c2.Shards[j] == i {
 				if c3.Shards[j] != i {
-					t.Fatalf("non-minimal transfer after Leave()s")
+					t.Fatalf("non-minimal transfer after Leave()isBalance")
 				}
 			}
 		}

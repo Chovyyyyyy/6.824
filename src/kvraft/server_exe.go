@@ -1,10 +1,10 @@
 package kvraft
 
-import "6.824-golabs-2021/raft"
+import "6.824/raft"
 
 func (kv *KVServer) ReadRaftApplyCommandLoop() {
-	for message := range kv.applyCh{
-		// 接收raft节点的命令
+	for message := range kv.applyCh {
+		// 监听raft的每个命令，传递给相关的RPCHandler
 		if message.CommandValid {
 			kv.GetCommandFromRaft(message)
 		}
@@ -17,16 +17,13 @@ func (kv *KVServer) ReadRaftApplyCommandLoop() {
 
 func (kv *KVServer) GetCommandFromRaft(message raft.ApplyMsg) {
 	op := message.Command.(Op)
-	DPrintf("[RaftApplyCommand]Server %d , Got Command --> Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v",kv.me, message.CommandIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
 
-	if message.CommandIndex <= kv.lastSSPointRaftLogIndex {
+	if message.CommandIndex <= kv.lastSnapShotRaftLogIndex {
 		return
 	}
 
-	// State Machine (KVServer solute the duplicate problem)
-	// duplicate command will not be exed
-	if !kv.ifRequestDuplicate(op.ClientId, op.RequestId) {
-		// execute command
+	// 重复的命令不会执行
+	if !kv.isRequestDuplicate(op.ClientId, op.RequestId) {
 		if op.Operation == "put" {
 			kv.ExecutePutOpOnKVDB(op)
 		}
@@ -35,55 +32,41 @@ func (kv *KVServer) GetCommandFromRaft(message raft.ApplyMsg) {
 		}
 	}
 
-	if kv.maxraftstate != -1{
-		kv.IsNeedToSendSnapShotCommand(message.CommandIndex,9)
+	if kv.maxraftstate != -1 {
+		kv.IsNeedToSendSnapShotCommand(message.CommandIndex, 9)
 	}
 
-	// Send message to the chan of op.ClientId
-	kv.SendMessageToWaitChan(op,message.CommandIndex)
+	kv.SendMessageToWaitChan(op, message.CommandIndex)
 }
 
-func (kv *KVServer) SendMessageToWaitChan(op Op, raftIndex int) bool{
+func (kv *KVServer) SendMessageToWaitChan(op Op, raftIndex int) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	ch, exist := kv.waitApplyCh[raftIndex]
 	if exist {
-		DPrintf("[RaftApplyMessageSendToWaitChan-->]Server %d , Send Command --> Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v",kv.me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
 		ch <- op
 	}
 	return exist
 }
 
-func (kv *KVServer) ExecuteGetOpOnKVDB(op Op) (string, bool){
+func (kv *KVServer) ExecuteGetOpOnKVDB(op Op) (string, bool) {
 	kv.mu.Lock()
 	value, exist := kv.kvDB[op.Key]
 	kv.lastRequestId[op.ClientId] = op.RequestId
 	kv.mu.Unlock()
-
-	if exist {
-		DPrintf("[KVServerExeGET----]ClientId :%d ,RequestID :%d ,Key : %v, value :%v",op.ClientId, op.RequestId, op.Key, value)
-	} else {
-		DPrintf("[KVServerExeGET----]ClientId :%d ,RequestID :%d ,Key : %v, But No KEY!!!!",op.ClientId, op.RequestId, op.Key)
-	}
-	kv.DprintfKVDB()
-	return value,exist
+	return value, exist
 }
 
 func (kv *KVServer) ExecutePutOpOnKVDB(op Op) {
-
 	kv.mu.Lock()
 	kv.kvDB[op.Key] = op.Value
 	kv.lastRequestId[op.ClientId] = op.RequestId
 	kv.mu.Unlock()
-
-	DPrintf("[KVServerExePUT----]ClientId :%d ,RequestID :%d ,Key : %v, value : %v",op.ClientId, op.RequestId, op.Key, op.Value)
-	kv.DprintfKVDB()
 }
 
-func (kv *KVServer) ExecuteAppendOpOnKVDB(op Op){
-
+func (kv *KVServer) ExecuteAppendOpOnKVDB(op Op) {
 	kv.mu.Lock()
-	value,exist := kv.kvDB[op.Key]
+	value, exist := kv.kvDB[op.Key]
 	if exist {
 		kv.kvDB[op.Key] = value + op.Value
 	} else {
@@ -91,18 +74,14 @@ func (kv *KVServer) ExecuteAppendOpOnKVDB(op Op){
 	}
 	kv.lastRequestId[op.ClientId] = op.RequestId
 	kv.mu.Unlock()
-
-	DPrintf("[KVServerExeAPPEND-----]ClientId :%d ,RequestID :%d ,Key : %v, value : %v",op.ClientId, op.RequestId, op.Key, op.Value)
-	kv.DprintfKVDB()
 }
 
-func (kv *KVServer) ifRequestDuplicate(newClientId int64, newRequestId int) bool{
+func (kv *KVServer) isRequestDuplicate(newClientId int64, newRequestId int) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	// return true if message is duplicate
-	lastRequestId, ifClientInRecord := kv.lastRequestId[newClientId]
-	if !ifClientInRecord {
-		// kv.lastRequestId[newClientId] = newRequestId
+	lastRequestId, isClientInRecord := kv.lastRequestId[newClientId]
+	if !isClientInRecord {
 		return false
 	}
 	return newRequestId <= lastRequestId

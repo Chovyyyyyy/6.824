@@ -1,16 +1,18 @@
 package shardctrler
 
+
 import (
-	"6.824-golabs-2021/raft"
+	"6.824/raft"
+	"log"
 	"time"
 )
-import "6.824-golabs-2021/labrpc"
+import "6.824/labrpc"
 import "sync"
-import "6.824-golabs-2021/labgob"
-
+import "6.824/labgob"
 
 const (
-	CONSENSUS_TIMEOUT = 5000
+	Debug = false
+	CONSENSUS_TIMEOUT = 5000 // ms
 
 	QueryOp = "query"
 	JoinOp = "join"
@@ -18,40 +20,56 @@ const (
 	MoveOp = "move"
 )
 
+func DPrintf(format string, a ...interface{}) (n int, err error) {
+	if Debug {
+		log.Printf(format, a...)
+	}
+	return
+}
+
 type ShardCtrler struct {
 	mu      sync.Mutex
 	me      int
 	rf      *raft.Raft
+	maxraftstate int
 	applyCh chan raft.ApplyMsg
-	maxRaftState int
-	// Your data here.
 
-	configs       []Config // indexed by config num
-	waitApplyCh   map[int]chan Op
+	// Your data here.
+  	configs []Config
+
+	// 和lab3类似
+	waitApplyCh map[int]chan Op
 	lastRequestId map[int64]int
 
 	lastSnapShotRaftLogIndex int
 }
 
+
 type Op struct {
 	// Your data here.
-	Operation   string
-	ClientId    int64
-	RequestId   int
-	QueryNumber int
+	Operation string
+	ClientId int64
+	RequestId    int
+	NumQuery    int
 	ServersJoin map[int][]string
-	GidsLeave   []int
-	ShardMove   int
-	GidMove     int
+	GidsLeave []int
+	ShardMove int
+	GidMove   int
 }
 
+//
+// servers[] contains the ports of the set of
+// servers that will cooperate via Raft to
+// form the fault-tolerant shardctrler service.
+// me is the index of the current server in servers[].
+//
 func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister) *ShardCtrler {
 	sc := new(ShardCtrler)
 	sc.me = me
 
 	sc.configs = make([]Config, 1)
 	sc.configs[0].Groups = map[int][]string{}
-	sc.maxRaftState = -1
+	sc.maxraftstate = -1
 
 
 	labgob.Register(Op{})
@@ -77,7 +95,6 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 		reply.Err = ErrWrongLeader
 		return
 	}
-
 	op := Op{Operation: JoinOp, ClientId: args.ClientId, RequestId: args.RequestId, ServersJoin: args.Servers}
 	raftIndex,_,_ := sc.rf.Start(op)
 
@@ -115,7 +132,6 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 
 func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	// Your code here.
-	//DPrintf("[Leave]Server %d, From Client %d, Request %d, leaveGidNum %d", sc.me,args.ClientId,args.Requestid,args.GIDs)
 	if _,ifLeader := sc.rf.GetState(); !ifLeader {
 		reply.Err = ErrWrongLeader
 		return
@@ -157,13 +173,12 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 
 func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	// Your code here.
-	//DPrintf("[Move]Server %d, From Client %d, Request %d, Shard %d to Gid %d", sc.me,args.ClientId,args.Requestid,args.Shard, args.GID)
 	if _,ifLeader := sc.rf.GetState(); !ifLeader {
 		reply.Err = ErrWrongLeader
 		return
 	}
 
-	op := Op{Operation: MoveOp, ClientId: args.ClientId, RequestId: args.RequestId, ShardMove: args.Shard,GidMove: args.GID}
+	op := Op{Operation: MoveOp, ClientId: args.ClientId, RequestId: args.RequestId, ShardMove: args.Shard, GidMove: args.GID}
 	raftIndex,_,_ := sc.rf.Start(op)
 
 	// create WaitForCh
@@ -199,13 +214,11 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 
 func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	// Your code here.
-	//DPrintf("[Query]Server %d,From Client %d, Request %d, Num %d", sc.me,args.ClientId,args.Requestid,args.Num)
 	if _,ifLeader := sc.rf.GetState(); !ifLeader {
 		reply.Err = ErrWrongLeader
 		return
 	}
-	//DPrintf("[Leader]Server %d is the leader",sc.me)
-	op := Op{Operation: QueryOp,ClientId: args.ClientId, RequestId: args.RequestId, QueryNumber: args.Num}
+	op := Op{Operation: QueryOp,ClientId: args.ClientId, RequestId: args.RequestId, NumQuery: args.Num}
 	raftIndex,_,_ := sc.rf.Start(op)
 
 	// create WaitForCh
@@ -241,6 +254,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	return
 }
 
+
 //
 // the tester calls Kill() when a ShardCtrler instance won't
 // be needed again. you are not required to do anything
@@ -256,4 +270,5 @@ func (sc *ShardCtrler) Kill() {
 func (sc *ShardCtrler) Raft() *raft.Raft {
 	return sc.rf
 }
+
 

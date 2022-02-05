@@ -1,11 +1,10 @@
 package kvraft
 
 import (
-	"6.824-golabs-2021/labrpc"
-	"log"
-	"math/big"
+	"6.824/labrpc"
 )
 import "crypto/rand"
+import "math/big"
 import mathrand "math/rand"
 
 
@@ -44,21 +43,6 @@ func MakeClerk(servers []*labrpc.ClientEnd) *Clerk {
 // arguments. and reply must be passed as a pointer.
 //
 
-
-/*
-After calling Start(), your kvservers will need to wait for Raft to complete agreement.
-Commands that have been agreed upon arrive on the applyCh.
-Your code will need to keep reading applyCh while PutAppend() and Get() handlers submit commands to the Raft log using Start().
-Beware of deadlock between the kvserver and its Raft library.
-You are allowed to add fields to the Raft ApplyMsg, and to add fields to Raft RPCs such as AppendEntries,
-however this should not be necessary for most implementations.
-A kvserver should not complete a Get() RPC if it is not part of a majority (so that it does not serve stale data).
-A simple solution is to enter every Get() (as well as each Put() and Append()) in the Raft log.
-You don't have to implement the optimization for read-only operations that is described in Section 8.
-It's best to add locking from the start because the need to avoid deadlocks sometimes affects overall code design.
-Check that your code is race-free using go test -race.
-*/
-
 func GetRandomServer(length int) int{
 	return mathrand.Intn(length)
 }
@@ -66,17 +50,13 @@ func GetRandomServer(length int) int{
 func (ck *Clerk) SendGetToServer(key string, server int) string {
 	args := GetArgs{Key: key, ClientId: ck.clientId, RequestId: ck.requestId}
 	reply := GetReply{}
-
-	log.Printf("[ClientSend GET]From ClientId %d, RequesetId %d, To Server %d, key : %v",ck.clientId, ck.requestId, server, key)
 	ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
 
 	if !ok || reply.Err == ErrWrongLeader{
 		return ck.SendGetToServer(key,(server+1) % len(ck.servers))
 	}
 
-
 	if reply.Err == OK {
-		DPrintf("[ClientSend GET SUCCESS]From ClientId %d, RequestId %d, key : %v, get value :%v",ck.clientId, ck.requestId, key, reply.Value)
 		ck.recentLeaderId = server
 		return reply.Value
 	}
@@ -85,7 +65,6 @@ func (ck *Clerk) SendGetToServer(key string, server int) string {
 }
 
 func (ck *Clerk) Get(key string) string {
-
 
 	ck.requestId++
 	requestId := ck.requestId
@@ -125,8 +104,6 @@ func (ck *Clerk) SendPutAppendToServer(key string,value string, opreation string
 	args := PutAppendArgs{Key: key, Value: value, Opreation : opreation, ClientId: ck.clientId, RequestId: ck.requestId}
 	reply := PutAppendReply{}
 
-
-	DPrintf("[ClientSend PUTAPPEND]From ClientId %d, RequesetId %d, To Server %d, key : %v, value : %v, Opreation : %v",ck.clientId, ck.requestId, server, key, value, opreation)
 	ok := ck.servers[server].Call("KVServer.PutAppend", &args, &reply)
 
 	if !ok || reply.Err == ErrWrongLeader{
@@ -134,7 +111,6 @@ func (ck *Clerk) SendPutAppendToServer(key string,value string, opreation string
 	}
 
 	if reply.Err == OK {
-		DPrintf("[ClientSend PUTAPPEND SUCCESS]From ClientId %d, RequesetId %d, key : %v, value : %v, Opreation : %v",ck.clientId, ck.requestId, key, value, opreation)
 		ck.recentLeaderId = server
 		return
 	}

@@ -2,35 +2,36 @@ package shardkv
 
 import "time"
 
+
+
 func (kv *ShardKV) PullNewConfigLoop() {
-	for !kv.killed() {
+	for !kv.killed(){
 		kv.mu.Lock()
 		lastConfigNum := kv.config.Num
-		_,isLeader := kv.rf.GetState()
+		_,ifLeader := kv.rf.GetState()
 		kv.mu.Unlock()
 
-		if !isLeader {
-			time.Sleep(500*time.Millisecond)
+		if !ifLeader{
+			time.Sleep(CONFIGCHECK_TIMEOUT*time.Millisecond)
 			continue
 		}
 
 		newestConfig := kv.mck.Query(lastConfigNum+1)
 		if newestConfig.Num == lastConfigNum+1 {
-			op := Op{
-				Operation: "NewConfig",
-				ConfigNewConfig: newestConfig,
-			}
+			// Got a new Config
+			op := Op{Operation: NEWCONFIGOp, Config_NEWCONFIG: newestConfig}
 			kv.mu.Lock()
-			if _,isLeader := kv.rf.GetState(); isLeader {
+			if _,ifLeader := kv.rf.GetState(); ifLeader{
 				kv.rf.Start(op)
-			}
+				}
 			kv.mu.Unlock()
 		}
-		time.Sleep(500*time.Millisecond)
+
+		time.Sleep(CONFIGCHECK_TIMEOUT*time.Millisecond)
 	}
 }
 
-// TODO "MigrateShard" RPC Handler
+
 func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply) {
 	kv.mu.Lock()
 	myConfigNum := kv.config.Num
@@ -51,14 +52,12 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 		return
 	}
 
-	//DPrintf("[GET SendToWrongLeader]From Client %d (Request %d) To Server %d",args.ClientId,args.RequestId, kv.me)
-	op := Op{Operation: "Migrate", MigrateDataMigrate: args.MigrateData, ConfigNumMigrate: args.ConfigNum}
+	op := Op{Operation: MIGRATESHARDOp, MigrateData_MIGRATE: args.MigrateData, ConfigNum_MIGRATE: args.ConfigNum}
 
 	raftIndex, _, _ := kv.rf.Start(op)
 
 	// create waitForCh
 	kv.mu.Lock()
-	//DPrintf("[MiGRATE StartToRaft]From GId %d, Server %d ,ConfigNum %d", kv.gid,kv.me, args.ConfigNum)
 	chForRaftIndex, exist := kv.waitApplyCh[raftIndex]
 	if !exist {
 		kv.waitApplyCh[raftIndex] = make(chan Op, 1)
@@ -67,14 +66,13 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 	kv.mu.Unlock()
 	// timeout
 	select {
-	case <-time.After(time.Millisecond * 500):
-		//DPrintf("[MiGATE TIMEOUT!!!]From Client %d (Request %d) To Server %d, key %v, raftIndex %d", args.ClientId, args.RequestId, kv.me, op.Key, raftIndex)
+	case <-time.After(time.Millisecond * CONSENSUS_TIMEOUT):
 		kv.mu.Lock()
-		_, ifLeaderr := kv.rf.GetState()
+		_, ifLeader := kv.rf.GetState()
 		tempConfig := kv.config.Num
 		kv.mu.Unlock()
 
-		if args.ConfigNum <= tempConfig && kv.CheckMigrateState(args.MigrateData) && ifLeaderr {
+		if args.ConfigNum <= tempConfig && kv.CheckMigrateState(args.MigrateData) && ifLeader {
 			reply.ConfigNum = tempConfig
 			reply.Err = OK
 		} else {
@@ -82,11 +80,10 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 		}
 
 	case raftCommitOp := <-chForRaftIndex:
-		//DPrintf("[WaitChanGetRaftApplyMessage<--]Server %d , get Command <-- Index:%d , ClientId %d, RequestId %d, Opreation %v, Key :%v, Value :%v", kv.me, raftIndex, op.ClientId, op.RequestId, op.Operation, op.Key, op.Value)
 		kv.mu.Lock()
 		tempConfig := kv.config.Num
 		kv.mu.Unlock()
-		if raftCommitOp.ConfigNumMigrate == args.ConfigNum && args.ConfigNum <= tempConfig && kv.CheckMigrateState(args.MigrateData) {
+		if raftCommitOp.ConfigNum_MIGRATE == args.ConfigNum && args.ConfigNum <= tempConfig && kv.CheckMigrateState(args.MigrateData) {
 			reply.ConfigNum = tempConfig
 			reply.Err = OK
 		} else {
@@ -100,14 +97,15 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 	return
 }
 
+
 func (kv *ShardKV) SendShardToOtherGroupLoop() {
-	for !kv.killed() {
+	for !kv.killed(){
 		kv.mu.Lock()
-		_,isLeader := kv.rf.GetState()
+		_,ifLeader := kv.rf.GetState()
 		kv.mu.Unlock()
 
-		if !isLeader {
-			time.Sleep(500*time.Millisecond)
+		if !ifLeader{
+			time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 			continue
 		}
 
@@ -120,21 +118,21 @@ func (kv *ShardKV) SendShardToOtherGroupLoop() {
 		}
 		kv.mu.Unlock()
 		if noMigrate{
-			time.Sleep(500*time.Millisecond)
+			time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 			continue
 		}
 
-		isNeedSend, sendData := kv.isHaveSendData()
-		if !isNeedSend{
-			time.Sleep(500*time.Millisecond)
+		ifNeedSend, sendData := kv.ifHaveSendData()
+		if !ifNeedSend{
+			time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 			continue
 		}
 		kv.sendShardComponent(sendData)
-		time.Sleep(500*time.Millisecond)
+		time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 	}
 }
 
-func (kv *ShardKV) isHaveSendData() (bool, map[int][]ShardComponent) {
+func (kv *ShardKV) ifHaveSendData() (bool, map[int][]ShardComponent) {
 	sendData := kv.MakeSendShardComponent()
 	if len(sendData) == 0 {
 		return false,make(map[int][]ShardComponent)
@@ -150,8 +148,8 @@ func (kv *ShardKV) MakeSendShardComponent()(map[int][]ShardComponent){
 	for shard :=0;shard<NShards;shard++ {
 		nowOwner := kv.config.Shards[shard]
 		if kv.migratingShard[shard] && kv.gid != nowOwner{
-			tempComponent := ShardComponent{ShardIdx: shard,KVDataBaseShard: make(map[string]string),ClientRequestId: make(map[int64]int)}
-			CloneSecondComponentIntoFirstExceptShardIndex(&tempComponent,kv.KvDataBase[shard])
+			tempComponent := ShardComponent{ShardIndex: shard,KVDBOfShard: make(map[string]string),ClientRequestId: make(map[int64]int)}
+			CloneSecondComponentIntoFirstExceptShardIndex(&tempComponent,kv.kvDB[shard])
 			sendData[nowOwner] = append(sendData[nowOwner],tempComponent)
 		}
 	}
@@ -165,7 +163,7 @@ func (kv *ShardKV) sendShardComponent(sendData map[int][]ShardComponent) {
 		groupServers := kv.config.Groups[aimGid]
 		kv.mu.Unlock()
 		for _,components := range ShardComponents {
-			tempComponent := ShardComponent{ShardIdx: components.ShardIdx,KVDataBaseShard: make(map[string]string),ClientRequestId: make(map[int64]int)}
+			tempComponent := ShardComponent{ShardIndex: components.ShardIndex,KVDBOfShard: make(map[string]string),ClientRequestId: make(map[int64]int)}
 			CloneSecondComponentIntoFirstExceptShardIndex(&tempComponent,components)
 			args.MigrateData = append(args.MigrateData,tempComponent)
 		}
@@ -186,7 +184,7 @@ func (kv *ShardKV) callMigrateRPC(groupServers []string, args *MigrateShardArgs)
 			if myConfigNum != args.ConfigNum || kv.CheckMigrateState(args.MigrateData){
 				return
 			} else {
-				kv.rf.Start(Op{Operation: "Migrate",MigrateDataMigrate: args.MigrateData,ConfigNumMigrate: args.ConfigNum})
+				kv.rf.Start(Op{Operation: MIGRATESHARDOp,MigrateData_MIGRATE: args.MigrateData,ConfigNum_MIGRATE: args.ConfigNum})
 				return
 			}
 		}

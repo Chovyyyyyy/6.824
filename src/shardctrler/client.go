@@ -1,17 +1,16 @@
 package shardctrler
 
-//
-// Shardctrler clerk.
-//
+
 
 import (
-	"6.824-golabs-2021/labrpc"
+	"6.824/labrpc"
 	mathrand "math/rand"
 )
 import "time"
 import "crypto/rand"
 import "math/big"
 
+const RequestIntervalTime = 120
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	// Your data here.
@@ -43,7 +42,7 @@ func GetRandomServer(length int) int{
 func (ck *Clerk) Query(num int) Config {
 	ck.requestId++
 	server := ck.recentLeaderId
-	args := &QueryArgs{Num: num,ClientId: ck.clientId,RequestId: ck.requestId}
+	args := &QueryArgs{Num: num,ClientId: ck.clientId, RequestId: ck.requestId}
 	// Your code here.
 
 	for {
@@ -59,14 +58,14 @@ func (ck *Clerk) Query(num int) Config {
 			ck.recentLeaderId = server
 			return reply.Config
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(RequestIntervalTime * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Join(servers map[int][]string) {
 	ck.requestId++
 	server := ck.recentLeaderId
-	args := &JoinArgs{Servers: servers,ClientId: ck.clientId,RequestId: ck.requestId}
+	args := &JoinArgs{Servers: servers,ClientId: ck.clientId, RequestId: ck.requestId}
 	// Your code here.
 	for {
 		reply := JoinReply{}
@@ -81,14 +80,14 @@ func (ck *Clerk) Join(servers map[int][]string) {
 			ck.recentLeaderId = server
 			return
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(RequestIntervalTime * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Leave(gids []int) {
 	ck.requestId++
 	server := ck.recentLeaderId
-	args := &LeaveArgs{GIDs: gids,ClientId: ck.clientId,RequestId: ck.requestId}
+	args := &LeaveArgs{GIDs: gids,ClientId: ck.clientId, RequestId: ck.requestId}
 	// Your code here.
 
 	for {
@@ -104,14 +103,14 @@ func (ck *Clerk) Leave(gids []int) {
 			ck.recentLeaderId = server
 			return
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(RequestIntervalTime * time.Millisecond)
 	}
 }
 
 func (ck *Clerk) Move(shard int, gid int) {
 	ck.requestId++
 	server := ck.recentLeaderId
-	args := &MoveArgs{Shard: shard,GID: gid,ClientId: ck.clientId,RequestId: ck.requestId}
+	args := &MoveArgs{Shard: shard,GID: gid,ClientId: ck.clientId, RequestId: ck.requestId}
 	// Your code here.
 
 	for {
@@ -127,6 +126,6 @@ func (ck *Clerk) Move(shard int, gid int) {
 			ck.recentLeaderId = server
 			return
 		}
-		time.Sleep(120 * time.Millisecond)
+		time.Sleep(RequestIntervalTime * time.Millisecond)
 	}
 }

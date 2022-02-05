@@ -1,34 +1,30 @@
 package kvraft
 
-import (
-	"6.824-golabs-2021/labgob"
-	"6.824-golabs-2021/raft"
-	"bytes"
-)
+import "bytes"
+import "6.824/labgob"
+import "6.824/raft"
 
 func (kv *KVServer) IsNeedToSendSnapShotCommand(raftIndex int, proportion int){
 	if kv.rf.GetRaftStateSize() > (kv.maxraftstate*proportion/10){
-		// Send SnapShot Command
 		snapshot := kv.MakeSnapShot()
 		kv.rf.Snapshot(raftIndex, snapshot)
 	}
 }
 
 
-// Handler the SnapShot from kv.rf.applyCh
+
 func (kv *KVServer) GetSnapShotFromRaft(message raft.ApplyMsg) {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	if kv.rf.CondInstallSnapshot(message.SnapshotTerm, message.SnapshotIndex, message.Snapshot) {
 		kv.ReadSnapShotToInstall(message.Snapshot)
-		kv.lastSSPointRaftLogIndex = message.SnapshotIndex
+		kv.lastSnapShotRaftLogIndex = message.SnapshotIndex
 	}
 }
 
 
 
-// TODO :  SnapShot include KVDB, lastrequestId map
-// Give it to raft when server decide to start a snapshot
+
 func (kv *KVServer) MakeSnapShot() []byte{
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -51,9 +47,7 @@ func (kv *KVServer) ReadSnapShotToInstall(snapshot []byte){
 	var persist_kvdb map[string]string
 	var persist_lastRequestId map[int64]int
 
-	if d.Decode(&persist_kvdb) != nil || d.Decode(&persist_lastRequestId) != nil {
-		DPrintf("KVSERVER %d read persister got a problem!!!!!!!!!!",kv.me)
-	} else {
+	if d.Decode(&persist_kvdb) == nil && d.Decode(&persist_lastRequestId) == nil {
 		kv.kvDB = persist_kvdb
 		kv.lastRequestId = persist_lastRequestId
 	}

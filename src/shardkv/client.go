@@ -8,19 +8,13 @@ package shardkv
 // talks to the group that holds the key's shard.
 //
 
-import (
-	"6.824-golabs-2021/labrpc"
-)
+import "6.824/labrpc"
 import "crypto/rand"
 import "math/big"
-import "6.824-golabs-2021/shardctrler"
+import "6.824/shardctrler"
 import "time"
 
-//
-// which shard is a key in?
-// please use this function,
-// and please do not change it.
-//
+
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -42,7 +36,7 @@ type Clerk struct {
 	config   shardctrler.Config
 	make_end func(string) *labrpc.ClientEnd
 	// You will have to modify this struct.
-	clientId  int64
+	clientId int64
 	requestId int
 }
 
@@ -75,12 +69,7 @@ func MakeClerk(ctrlers []*labrpc.ClientEnd, make_end func(string) *labrpc.Client
 func (ck *Clerk) Get(key string) string {
 	ck.requestId++
 	for {
-		args := GetArgs{
-			Key: key,
-			ClientId: ck.clientId,
-			RequestId: ck.requestId,
-			ConfigNum: ck.config.Num,
-		}
+		args := GetArgs{Key: key,ClientId: ck.clientId, RequestId: ck.requestId, ConfigNum: ck.config.Num}
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
@@ -95,11 +84,9 @@ func (ck *Clerk) Get(key string) string {
 				if ok && (reply.Err == ErrWrongGroup) {
 					break
 				}
-				// ... not ok, or ErrWrongLeader
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
-		// ask controller for the latest configuration.
 		ck.config = ck.sm.Query(-1)
 	}
 
@@ -110,17 +97,10 @@ func (ck *Clerk) Get(key string) string {
 // shared by Put and Append.
 // You will have to modify this function.
 //
-func (ck *Clerk) PutAppend(key string, value string, op string) {
+func (ck *Clerk) PutAppend(key string, value string, opreation string) {
 	ck.requestId++
 	for {
-		args := PutAppendArgs{
-			Key: key,
-			Op: op,
-			Value: value,
-			ClientId: ck.clientId,
-			RequestId: ck.requestId,
-			ConfigNum: ck.config.Num,
-		}
+		args := PutAppendArgs{Key:key,Opreation: opreation, Value: value,ClientId: ck.clientId, RequestId: ck.requestId, ConfigNum: ck.config.Num}
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
@@ -134,18 +114,17 @@ func (ck *Clerk) PutAppend(key string, value string, op string) {
 				if ok && reply.Err == ErrWrongGroup {
 					break
 				}
-				// ... not ok, or ErrWrongLeader
+
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
-		// ask controler for the latest configuration.
 		ck.config = ck.sm.Query(-1)
 	}
 }
 
 func (ck *Clerk) Put(key string, value string) {
-	ck.PutAppend(key, value, "Put")
+	ck.PutAppend(key, value, PUTOp)
 }
 func (ck *Clerk) Append(key string, value string) {
-	ck.PutAppend(key, value, "Append")
+	ck.PutAppend(key, value, APPENDOp)
 }
