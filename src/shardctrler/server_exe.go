@@ -21,24 +21,29 @@ import (
 //
 
 
-
+// ReadRaftApplyCommandLoop 从raft接收命令
 func (sc *ShardCtrler) ReadRaftApplyCommandLoop(){
 	for message := range sc.applyCh {
+		// 处理命令
 		if message.CommandValid {
 			sc.GetCommandFromRaft(message)
 		}
+		// 处理快照
 		if message.SnapshotValid {
 			sc.GetSnapShotFromRaft(message)
 		}
 	}
 }
 
+// GetCommandFromRaft 处理raft的命令
 func (sc *ShardCtrler) GetCommandFromRaft(message raft.ApplyMsg){
 	op := message.Command.(Op)
 
+	// 说明command过期
 	if message.CommandIndex <= sc.lastSnapShotRaftLogIndex {
 		return
 	}
+	// 判断请求是否重复
 	if !sc.isRequestDuplicate(op.ClientId, op.RequestId){
 		if op.Operation == JoinOp {
 			sc.ExecJoinOnController(op)
@@ -51,10 +56,12 @@ func (sc *ShardCtrler) GetCommandFromRaft(message raft.ApplyMsg){
 		}
 	}
 
+	// 如果maxraftstate不为-1，查看是否需要发送请求使用Snapshot保存快照
 	if sc.maxraftstate != -1{
-		sc.IfNeedToSendSnapShotCommand(message.CommandIndex,9)
+		sc.IsNeedToSendSnapShotCommand(message.CommandIndex,9)
 	}
 
+	// 处理完成之后添加到waitApplyCh中
 	sc.SendMessageToWaitChan(op, message.CommandIndex)
 }
 
@@ -97,86 +104,6 @@ func ShowConfig(config Config, op string){
 	}
 }
 
-func (sc *ShardCtrler) BalanceShardToGid(config *Config){
-	length := len(config.Groups)
-	average := NShards/length
-	subNum := NShards - average*length
-	avgNum := length - subNum
-
-	zeroAimGid := 0
-	for gid,_ := range config.Groups {
-		if gid != 0 {
-			zeroAimGid = gid
-		}
-	}
-
-	// countArray should not be have Gid 0
-	for shards, gid := range config.Shards {
-		if gid == 0 {
-			config.Shards[shards] = zeroAimGid
-		}
-	}
-
-	countArray := make(map[int][]int)
-	for shardIndex,gid := range config.Shards {
-		if _, exist := countArray[gid];exist {
-			countArray[gid] = append(countArray[gid],shardIndex)
-		} else {
-			countArray[gid] = make([]int,0)
-			countArray[gid] = append(countArray[gid], shardIndex)
-		}
-	}
-	for gid,_ := range config.Groups {
-		if _,exist := countArray[gid];!exist {
-			countArray[gid] = make([]int,0)
-		}
-	}
-
-	for {
-		if isBalance(average,avgNum,subNum,countArray){
-			break
-		}
-		// make Max Gid One Shard to Min Gid
-		maxShardsNum := -1
-		maxGid := -1
-		minShardsNum := NShards*10
-		minGid := -1
-		for gid, shardsArray := range countArray {
-			if len(shardsArray) >= maxShardsNum {
-				maxShardsNum = len(shardsArray)
-				maxGid = gid
-			}
-			if len(shardsArray) <= minShardsNum {
-				minShardsNum = len(shardsArray)
-				minGid = gid
-			}
-		}
-
-		fromGid := maxGid
-		movedShard := countArray[maxGid][maxShardsNum-1]
-		toGid := minGid
-
-		countArray[fromGid] = countArray[fromGid][:maxShardsNum-1]
-		countArray[toGid] = append(countArray[toGid], movedShard)
-		config.Shards[movedShard] = toGid
-	}
-
-}
-
-func isBalance(average int, avgNum int, subNum int, countArray map[int][]int) bool{
-	shouldAvg := 0
-	shouldAvgPlus := 0
-	for gid, shards := range countArray {
-		if len(shards) == average && gid != 0{
-			shouldAvg++
-		}
-		if len(shards) == average+1 && gid != 0{
-			shouldAvgPlus++
-		}
-	}
-
-	return shouldAvg == avgNum && shouldAvgPlus == subNum
-}
 
 func (sc *ShardCtrler) ExecQueryOnController(op Op) Config {
 	sc.mu.Lock()
@@ -190,32 +117,38 @@ func (sc *ShardCtrler) ExecQueryOnController(op Op) Config {
 
 }
 
+// ExecJoinOnController 执行添加操作
 func (sc *ShardCtrler) ExecJoinOnController(op Op) {
 	sc.mu.Lock()
+	// 更新requestId
 	sc.lastRequestId[op.ClientId] = op.RequestId
 	sc.configs = append(sc.configs,*sc.MakeJoinConfig(op.ServersJoin))
 	sc.mu.Unlock()
 }
 
+// ExecLeaveOnController 执行移除Group操作
 func (sc *ShardCtrler) ExecLeaveOnController(op Op) {
 	sc.mu.Lock()
+	// 更新requestId
 	sc.lastRequestId[op.ClientId] = op.RequestId
 	sc.configs = append(sc.configs,*sc.MakeLeaveConfig(op.GidsLeave))
 	sc.mu.Unlock()
 }
 
+// ExecMoveOnController 将Shard分配给GID的Group
 func (sc *ShardCtrler) ExecMoveOnController(op Op) {
 	sc.mu.Lock()
+	// 更新requestId
 	sc.lastRequestId[op.ClientId] = op.RequestId
 	sc.configs = append(sc.configs,*sc.MakeMoveConfig(op.ShardMove,op.GidMove))
 	sc.mu.Unlock()
 }
 
-
+// 请求是否重复
 func (sc *ShardCtrler) isRequestDuplicate(newClientId int64, newRequestId int) bool{
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-	// return true if message is duplicate
+	// 如果消息重复返回true
 	lastRequestId, ifClientInRecord := sc.lastRequestId[newClientId]
 	if !ifClientInRecord {
 		// kv.lastRequestId[newClientId] = newRequestId

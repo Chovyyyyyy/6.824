@@ -9,6 +9,9 @@ import (
 // change the raft server state and do something init
 func (rf *Raft) targetState(target int, resetTime bool) {
 
+	//可以将voteFor重置为-1，因为既然该peer的rf.currentTerm < args.Term，说明该peer此时还没有给哪个candidate投票，
+	//因为一旦它投过票，其任期就会更新为args.Term。
+	//所以此时重置voteFor为-1是安全的，往下继续执行处理，仍然可以投票。
 	if target == TO_FOLLOWER {
 		rf.state = FOLLOWER
 		rf.votedFor = -1
@@ -42,6 +45,8 @@ func (rf *Raft) targetState(target int, resetTime bool) {
 		rf.matchIndex = make([]int,len(rf.peers))
 		rf.matchIndex[rf.me] = rf.getLastIndex()
 		rf.electionTime = time.Now()
+		// 最后并行向每个follower发送心跳包，宣布自己胜出，并防止重新选举
+		//go rf.leaderAppendEntries()
 	}
 }
 
@@ -82,7 +87,7 @@ func (rf *Raft) getLastTerm() int{
 
 func (rf *Raft) getPrevLogInfo(server int) (int,int){
 	newEntryBeginIndex := rf.nextIndex[server]-1
-	// TODO fix it in lab4
+
 	lastIndex := rf.getLastIndex()
 	if newEntryBeginIndex == lastIndex+1 {
 		newEntryBeginIndex = lastIndex

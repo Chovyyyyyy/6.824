@@ -1,21 +1,5 @@
 package raft
 
-//
-// this is an outline of the API that raft must expose to
-// the service (or tester). see comments below for
-// each of these functions for more details.
-//
-// rf = Make(...)
-//   create a new Raft server.
-// rf.Start(command interface{}) (index, term, isleader)
-//   start agreement on a new log entry
-// rf.GetState() (term, isLeader)
-//   ask a Raft for its current term, and whether it thinks it is leader
-// ApplyMsg
-//   each time a new entry is committed to the log, each Raft peer
-//   should send an ApplyMsg to the service (or tester)
-//   in the same server.
-//
 
 import (
 	"6.824/labrpc"
@@ -59,10 +43,17 @@ const (
 	TO_CANDIDATE = 1
 	TO_LEADER    = 2
 
-	ELECTION_TIMEOUT_MAX = 250
-	ELECTION_TIMEOUT_MIN = 150
-	HEARTBEAT            = 40
-	APPLIED_TIMEOUT      = 28
+	// lab3，4可以过，但是rpc交互次数太多，lab2会failed
+	ELECTION_TIMEOUT_MAX = 160
+	ELECTION_TIMEOUT_MIN = 80
+	HEARTBEAT            = 24
+	APPLIED_TIMEOUT      = 10
+
+	// lab2可以过，lab3timeout
+	//ELECTION_TIMEOUT_MAX = 250
+	//ELECTION_TIMEOUT_MIN = 150
+	//HEARTBEAT            = 40
+	//APPLIED_TIMEOUT      = 28
 )
 
 type Raft struct {
@@ -72,6 +63,9 @@ type Raft struct {
 	me        int                 // this peer's index into peers[]
 	dead      int32               // set by Kill()
 
+	// Your data here (2A, 2B, 2C).
+	// Look at the paper's Figure 2 for a description of what
+	// state a Raft server must maintain.
 	// 持久性状态
 	currentTerm int     // 最新任期
 	votedFor    int     // 获得选票的候选人Id
@@ -120,6 +114,11 @@ func (rf *Raft) GetState() (int, bool) {
 // term. the third return value is true if this server believes it is
 // the leader.
 //
+// 将接收到的客户端命令追加到自己的本地log，
+//然后给其他所有peers并行发送AppendEntries RPC来迫使其他peer也同意领导者日志的内容，
+//在收到大多数peers的已追加该命令到log的肯定回复后，若该entry的任期等于leader的当前任期，
+//则leader将该entry标记为已提交的(committed)，提升(adavance)commitIndex到该entry所在的index，
+//并发送ApplyMsg消息到ApplyCh，相当于应用该entry的命令到状态机。
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	rf.mu.Lock()
@@ -133,7 +132,6 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		index := rf.getLastIndex() + 1
 		term := rf.currentTerm
 		rf.log = append(rf.log, Entry{Term: term, Command: command})
-		DPrintf("[StartCommand] Leader %d get command %v,index %d", rf.me, command, index)
 		rf.persist()
 		return index, term, true
 	}
@@ -210,7 +208,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 	go rf.heartBeatTicker()
 
-	go rf.committedToAppliedTicker()
+	go rf.applier()
 
 	return rf
 }

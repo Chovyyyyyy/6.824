@@ -40,7 +40,6 @@ type ShardCtrler struct {
 	// 和lab3类似
 	waitApplyCh map[int]chan Op
 	lastRequestId map[int64]int
-
 	lastSnapShotRaftLogIndex int
 }
 
@@ -91,14 +90,14 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister)
 
 func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 	// Your code here.
-	if _,ifLeader := sc.rf.GetState(); !ifLeader {
+	if _, isLeader := sc.rf.GetState(); !isLeader {
 		reply.Err = ErrWrongLeader
 		return
 	}
 	op := Op{Operation: JoinOp, ClientId: args.ClientId, RequestId: args.RequestId, ServersJoin: args.Servers}
 	raftIndex,_,_ := sc.rf.Start(op)
 
-	// create WaitForCh
+	// 创建channel
 	sc.mu.Lock()
 	chForRaftIndex, exist := sc.waitApplyCh[raftIndex]
 	if !exist {
@@ -107,14 +106,15 @@ func (sc *ShardCtrler) Join(args *JoinArgs, reply *JoinReply) {
 	}
 	sc.mu.Unlock()
 
-	//Timeout WaitFor
 	select {
+	// 超时
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT):
 		if sc.isRequestDuplicate(op.ClientId, op.RequestId){
 			reply.Err = OK
 		} else {
 			reply.Err = ErrWrongLeader
 		}
+	// 接收到消息
 	case raftCommitOp := <-chForRaftIndex:
 		if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId {
 			reply.Err = OK
@@ -140,7 +140,7 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	op := Op{Operation: LeaveOp, ClientId: args.ClientId, RequestId: args.RequestId, GidsLeave: args.GIDs}
 	raftIndex,_,_ := sc.rf.Start(op)
 
-	// create WaitForCh
+	// 创建channel
 	sc.mu.Lock()
 	chForRaftIndex, exist := sc.waitApplyCh[raftIndex]
 	if !exist {
@@ -149,8 +149,9 @@ func (sc *ShardCtrler) Leave(args *LeaveArgs, reply *LeaveReply) {
 	}
 	sc.mu.Unlock()
 
-	//Timeout WaitFor
+
 	select {
+	// 超时
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT):
 		if sc.isRequestDuplicate(op.ClientId, op.RequestId){
 			reply.Err = OK
@@ -181,7 +182,7 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	op := Op{Operation: MoveOp, ClientId: args.ClientId, RequestId: args.RequestId, ShardMove: args.Shard, GidMove: args.GID}
 	raftIndex,_,_ := sc.rf.Start(op)
 
-	// create WaitForCh
+	// 创建channel
 	sc.mu.Lock()
 	chForRaftIndex, exist := sc.waitApplyCh[raftIndex]
 	if !exist {
@@ -190,8 +191,8 @@ func (sc *ShardCtrler) Move(args *MoveArgs, reply *MoveReply) {
 	}
 	sc.mu.Unlock()
 
-	//Timeout WaitFor
 	select {
+	// 超时
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT):
 		if sc.isRequestDuplicate(op.ClientId, op.RequestId){
 			reply.Err = OK
@@ -221,7 +222,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	op := Op{Operation: QueryOp,ClientId: args.ClientId, RequestId: args.RequestId, NumQuery: args.Num}
 	raftIndex,_,_ := sc.rf.Start(op)
 
-	// create WaitForCh
+	// 创建channel
 	sc.mu.Lock()
 	chForRaftIndex, exist := sc.waitApplyCh[raftIndex]
 	if !exist {
@@ -230,8 +231,8 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 	}
 	sc.mu.Unlock()
 
-	//Timeout WaitFor
 	select {
+	// 超时
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT):
 		_,ifLeader := sc.rf.GetState()
 		if sc.isRequestDuplicate(op.ClientId, op.RequestId) && ifLeader{
@@ -242,7 +243,7 @@ func (sc *ShardCtrler) Query(args *QueryArgs, reply *QueryReply) {
 		}
 	case raftCommitOp := <-chForRaftIndex:
 		if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId {
-			// Exec Query
+			// 执行查询操作
 			reply.Config = sc.ExecQueryOnController(op)
 			reply.Err = OK
 		}

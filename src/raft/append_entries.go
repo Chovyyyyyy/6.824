@@ -18,10 +18,12 @@ type AppendEntriesReply struct {
 	ConflictingIndex int // optimizer func for find the nextIndex
 }
 
+// follower追加日志
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// rule 1
+	// 说明请求超时了
 	if args.Term < rf.currentTerm {
 		reply.Term = rf.currentTerm
 		reply.Success = false
@@ -34,16 +36,17 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	reply.Success = true
 	reply.ConflictingIndex = -1
 
+	// 判断server的state，防止选举时间超时
 	if rf.state != FOLLOWER {
 		rf.targetState(TO_FOLLOWER, true)
 	} else {
 		rf.electionTime = time.Now()
 		rf.persist()
 	}
-
-
+	// 如果快照的index要比args的index新的话，可以直接把leader的状态复制给follower
 	if rf.lastSnapShotIndex > args.PrevLogIndex {
 		reply.Success = false
+		//
 		reply.ConflictingIndex = rf.getLastIndex() + 1
 		return
 	}
@@ -53,9 +56,11 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.ConflictingIndex = rf.getLastIndex()
 		return
 	} else {
+		// 如果currentTerm冲突
 		if rf.getLogTermWithIndex(args.PrevLogIndex) != args.PrevLogTerm {
 			reply.Success = false
 			tempTerm := rf.getLogTermWithIndex(args.PrevLogIndex)
+			// 从index到快照，找到冲突term
 			for index := args.PrevLogIndex; index >= rf.lastSnapShotIndex; index-- {
 				if rf.getLogTermWithIndex(index) != tempTerm {
 					reply.ConflictingIndex = index + 1
@@ -92,7 +97,7 @@ func (rf *Raft) leaderAppendEntries() {
 				return
 			}
 			tempPrevLogIndex := rf.nextIndex[server] - 1
-			// 使用快照追加
+			// 如果当前快照index比logIndex要新的话，使用快照追加
 			if tempPrevLogIndex < rf.lastSnapShotIndex {
 				go rf.leaderSendSnapShot(server)
 				rf.mu.Unlock()
@@ -100,7 +105,7 @@ func (rf *Raft) leaderAppendEntries() {
 			}
 
 			args := AppendEntriesArgs{}
-
+			// 如果leader的lastIndex比nextIndex更新，那么需要进行日志追加，反之则不用
 			if rf.getLastIndex() >= rf.nextIndex[server] {
 				entriesNeeded := make([]Entry, 0)
 				entriesNeeded = append(entriesNeeded, rf.log[rf.nextIndex[server]-rf.lastSnapShotIndex:]...)
@@ -127,6 +132,7 @@ func (rf *Raft) leaderAppendEntries() {
 			reply := AppendEntriesReply{}
 			rf.mu.Unlock()
 
+			// 通过rpc请求Raft.AppendEntries
 			ok := rf.sendAppendEntries(server, &args, &reply)
 
 			if ok {

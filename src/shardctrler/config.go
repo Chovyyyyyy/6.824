@@ -20,7 +20,7 @@ func randstring(n int) string {
 	return s[0:n]
 }
 
-// Randomize server handles
+// 随机server进行处理
 func random_handles(kvh []*labrpc.ClientEnd) []*labrpc.ClientEnd {
 	sa := make([]*labrpc.ClientEnd, len(kvh))
 	copy(sa, kvh)
@@ -38,10 +38,10 @@ type config struct {
 	n            int
 	servers      []*ShardCtrler
 	saved        []*raft.Persister
-	endnames     [][]string // names of each server'isBalance sending ClientEnds
+	endnames     [][]string // 每个服务器的名称isBalance发送给ClientEnds
 	clerks       map[*Clerk][]string
 	nextClientId int
-	start        time.Time // time at which make_config() was called
+	start        time.Time // make_config()被调用的时间
 }
 
 func (cfg *config) checkTimeout() {

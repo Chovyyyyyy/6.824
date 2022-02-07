@@ -23,9 +23,9 @@ const NShards = 10
 // A configuration -- an assignment of shards to groups.
 // Please don't change this.
 type Config struct {
-	Num    int              // config number
-	Shards [NShards]int     // shard -> gid
-	Groups map[int][]string // gid -> servers[]
+	Num    int              // config编号，顺序号
+	Shards [NShards]int     // 分片位置信息，Shards[3] = 2，说明分片序号为3的分片负责的集群式是Group2
+	Groups map[int][]string // 集群成员信息，Groups[3] = ip1,ip2，说明gid=3的集群包含两台ip1和ip2的机器
 }
 
 const (

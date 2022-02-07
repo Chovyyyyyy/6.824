@@ -14,7 +14,6 @@ import "6.824/shardctrler"
 
 const (
 	Debug = false
-	//Debug = true
 	CONSENSUS_TIMEOUT = 500 // ms
 	CONFIGCHECK_TIMEOUT = 90
 	SENDSHARDS_TIMEOUT = 150
@@ -55,30 +54,31 @@ type ShardKV struct {
 	dead 		 int32
 	applyCh      chan raft.ApplyMsg
 	make_end     func(string) *labrpc.ClientEnd
-	gid          int // Use config.Shards ==> server contians which shards
+	gid          int // 服务器包含哪些分片
 	ctrlers      []*labrpc.ClientEnd
 	mck       	 *shardctrler.Clerk
-	maxraftstate int // snapshot if log grows this big
+	maxraftstate int // 如果日志达到极限压缩为快照
 
 	// Your definitions here.
-	kvDB []ShardComponent
+	kvDB []ShardComponent //每个 Shard 都有独立的数据 MAP 和 ClientSeq MAP
 	waitApplyCh map[int]chan Op
 
 	lastSnapShotRaftLogIndex int
 
 	config shardctrler.Config
-	migratingShard [NShards]bool
+	migratingShard [NShards]bool // 保证迁移中拒绝服务，避免脏读和旧数据
 
 
 }
 
-
+// CheckShardState 查看当前shard的状态是否可用
 func (kv *ShardKV) CheckShardState(clientNum int,shardIndex int)(bool,bool){
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	return kv.config.Num == clientNum && kv.config.Shards[shardIndex] == kv.gid, !kv.migratingShard[shardIndex]
 }
 
+// CheckMigrateState 查看是否有正在迁移的shard
 func (kv *ShardKV) CheckMigrateState(shardComponets []ShardComponent) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -270,6 +270,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.gid = gid
 	kv.ctrlers = ctrlers
 	kv.kvDB = make([]ShardComponent, NShards)
+	// 初始化每个分片的kvDataBase
 	for shard:=0;shard<NShards;shard++ {
 		kv.kvDB[shard] = ShardComponent{ShardIndex: shard, KVDBOfShard: make(map[string]string), ClientRequestId: make(map[int64]int)}
 	}
@@ -277,6 +278,7 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.mck = shardctrler.MakeClerk(kv.ctrlers)
 	kv.waitApplyCh = make(map[int]chan Op)
 
+	// 读取块找
 	snapshot := persister.ReadSnapshot()
 	if len(snapshot) > 0{
 		kv.ReadSnapShotToInstall(snapshot)
@@ -286,7 +288,9 @@ func StartServer(servers []*labrpc.ClientEnd, me int, persister *raft.Persister,
 	kv.rf = raft.Make(servers, me, persister, kv.applyCh)
 
 	go kv.ReadRaftApplyCommandLoop()
+
 	go kv.PullNewConfigLoop()
+
 	go kv.SendShardToOtherGroupLoop()
 
 	return kv

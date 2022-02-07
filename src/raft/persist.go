@@ -1,8 +1,8 @@
 package raft
 
 import (
-	"bytes"
 	"6.824/labgob"
+	"bytes"
 )
 
 //
@@ -20,21 +20,19 @@ func (rf *Raft) persistData() []byte{
 	e.Encode(rf.currentTerm)
 	e.Encode(rf.votedFor)
 	e.Encode(rf.log)
-	// e.Encode(rf.lastApplied)
 	e.Encode(rf.lastSnapShotIndex)
 	e.Encode(rf.lastSnapShotTerm)
-	//e.Encode(rf.persister.ReadSnapshot())
 	data := w.Bytes()
 	return data
 }
 
 func (rf *Raft) persist() {
+	// Your code here (2C).
 	data := rf.persistData()
 	rf.persister.SaveRaftState(data)
 }
 
-// restore previously persisted state.
-//
+// 恢复持久化状态
 func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
@@ -47,26 +45,19 @@ func (rf *Raft) readPersist(data []byte) {
 	var persist_currentTrem int
 	var persist_voteFor int
 	var persist_log []Entry
-	//var persist_lastApplied int
 	var persist_lastSSPointIndex int
 	var persist_lastSSPointTerm int
-	//var persist_snapshot []byte
 
 	if d.Decode(&persist_currentTrem) != nil ||
 		d.Decode(&persist_voteFor) != nil ||
 		d.Decode(&persist_log) != nil ||
-		//d.Decode(&persist_lastApplied) != nil ||
 		d.Decode(&persist_lastSSPointIndex) != nil ||
 		d.Decode(&persist_lastSSPointTerm) != nil {
-		//d.Decode(&persist_snapshot) != nil{
-		DPrintf("%d read persister got a problem!!!!!!!!!!",rf.me)
 	} else {
 		rf.currentTerm = persist_currentTrem
 		rf.votedFor = persist_voteFor
 		rf.log = persist_log
-		// rf.lastApplied = persist_lastApplied
 		rf.lastSnapShotIndex = persist_lastSSPointIndex
 		rf.lastSnapShotTerm = persist_lastSSPointTerm
-		// rf.persister.SaveStateAndSnapshot(rf.persistData(),persist_snapshot)
 	}
 }

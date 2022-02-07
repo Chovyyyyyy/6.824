@@ -52,7 +52,6 @@ func (ck *Clerk) Query(num int) Config {
 			server = (server+1)%len(ck.servers)
 			continue
 		}
-		// try each known server.
 
 		if reply.Err == OK {
 			ck.recentLeaderId = server
@@ -74,7 +73,6 @@ func (ck *Clerk) Join(servers map[int][]string) {
 			server = (server+1)%len(ck.servers)
 			continue
 		}
-		// try each known server.
 
 		if reply.Err == OK {
 			ck.recentLeaderId = server
@@ -97,7 +95,6 @@ func (ck *Clerk) Leave(gids []int) {
 			server = (server+1)%len(ck.servers)
 			continue
 		}
-		// try each known server.
 
 		if reply.Err == OK {
 			ck.recentLeaderId = server
@@ -120,7 +117,6 @@ func (ck *Clerk) Move(shard int, gid int) {
 			server = (server+1)%len(ck.servers)
 			continue
 		}
-		// try each known server.
 
 		if reply.Err == OK {
 			ck.recentLeaderId = server

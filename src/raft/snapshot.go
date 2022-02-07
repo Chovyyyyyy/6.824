@@ -39,7 +39,7 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	}
 	tempLog := make([]Entry,0)
 	tempLog = append(tempLog,Entry{})
-
+	// 从index开始制造快照
 	for i := index+1;i<=rf.getLastIndex();i++ {
 		tempLog = append(tempLog,rf.getLogWithIndex(i))
 	}
@@ -51,14 +51,15 @@ func (rf *Raft) Snapshot(index int, snapshot []byte) {
 	}
 
 	rf.lastSnapShotIndex = index
-
 	rf.log = tempLog
+	// 根据index更新
 	if index > rf.commitIndex{
 		rf.commitIndex = index
 	}
 	if index > rf.lastApplied{
 		rf.lastApplied = index
 	}
+	// 持久化
 	rf.persister.SaveStateAndSnapshot(rf.persistData(),snapshot)
 }
 
@@ -73,6 +74,7 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 
 	rf.currentTerm = args.Term
 	reply.Term = args.Term
+	// 如果不是follower则转变为follower，反之则更新选举时间
 	if rf.state != FOLLOWER {
 		rf.targetState(TO_FOLLOWER,true)
 	}else{
@@ -89,6 +91,7 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	tempLog := make([]Entry,0)
 	tempLog = append(tempLog,Entry{})
 
+	// 从index到server的lastIndex全部append到tempLog
 	for i := index+1;i<=rf.getLastIndex();i++ {
 		tempLog = append(tempLog,rf.getLogWithIndex(i))
 	}
@@ -103,6 +106,7 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	if index > rf.lastApplied{
 		rf.lastApplied = index
 	}
+	// 持久化保存
 	rf.persister.SaveStateAndSnapshot(rf.persistData(),args.Data)
 
 	msg := ApplyMsg{
@@ -113,11 +117,13 @@ func (rf *Raft) InstallSnapShot(args *InstallSnapshotArgs, reply *InstallSnapsho
 	}
 	rf.mu.Unlock()
 
+	// 添加到channel当中
 	rf.applyCh <- msg
 
 }
 
 
+// leader发送快照追加
 func (rf *Raft) leaderSendSnapShot(server int){
 	rf.mu.Lock()
 	args := InstallSnapshotArgs{
@@ -130,6 +136,7 @@ func (rf *Raft) leaderSendSnapShot(server int){
 	reply := InstallSnapshotReply{}
 	rf.mu.Unlock()
 
+	// 通过rpc请求Raft.InstallSnapShot
 	ok := rf.sendSnapShot(server,&args,&reply)
 
 	if ok {
@@ -138,6 +145,7 @@ func (rf *Raft) leaderSendSnapShot(server int){
 			rf.mu.Unlock()
 			return
 		}
+		// 说明leader落后了
 		if reply.Term > rf.currentTerm{
 			rf.targetState(FOLLOWER,true)
 			rf.mu.Unlock()

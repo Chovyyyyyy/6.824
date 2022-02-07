@@ -18,27 +18,31 @@ func (kv *KVServer) ReadRaftApplyCommandLoop() {
 func (kv *KVServer) GetCommandFromRaft(message raft.ApplyMsg) {
 	op := message.Command.(Op)
 
+	// 可以根据出现在那个索引处的操作是否实际上是你放在那里的操作
 	if message.CommandIndex <= kv.lastSnapShotRaftLogIndex {
 		return
 	}
 
 	// 重复的命令不会执行
 	if !kv.isRequestDuplicate(op.ClientId, op.RequestId) {
+		// put命令
 		if op.Operation == "put" {
 			kv.ExecutePutOpOnKVDB(op)
 		}
+		// append命令
 		if op.Operation == "append" {
 			kv.ExecuteAppendOpOnKVDB(op)
 		}
 	}
 
+	// 如果maxraftstate不为-1，查看是否需要发送请求使用Snapshot保存快照
 	if kv.maxraftstate != -1 {
 		kv.IsNeedToSendSnapShotCommand(message.CommandIndex, 9)
 	}
-
+	// 把raft的命令添加到channel当中
 	kv.SendMessageToWaitChan(op, message.CommandIndex)
 }
-
+// SendMessageToWaitChan 等待server进行处理
 func (kv *KVServer) SendMessageToWaitChan(op Op, raftIndex int) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
@@ -49,6 +53,7 @@ func (kv *KVServer) SendMessageToWaitChan(op Op, raftIndex int) bool {
 	return exist
 }
 
+// ExecuteGetOpOnKVDB 在kvDB执行Get操作
 func (kv *KVServer) ExecuteGetOpOnKVDB(op Op) (string, bool) {
 	kv.mu.Lock()
 	value, exist := kv.kvDB[op.Key]
@@ -57,13 +62,14 @@ func (kv *KVServer) ExecuteGetOpOnKVDB(op Op) (string, bool) {
 	return value, exist
 }
 
+// ExecutePutOpOnKVDB 在kvDB执行Put操作
 func (kv *KVServer) ExecutePutOpOnKVDB(op Op) {
 	kv.mu.Lock()
 	kv.kvDB[op.Key] = op.Value
 	kv.lastRequestId[op.ClientId] = op.RequestId
 	kv.mu.Unlock()
 }
-
+// ExecuteAppendOpOnKVDB 在kvDB执行Append操作
 func (kv *KVServer) ExecuteAppendOpOnKVDB(op Op) {
 	kv.mu.Lock()
 	value, exist := kv.kvDB[op.Key]
@@ -76,10 +82,11 @@ func (kv *KVServer) ExecuteAppendOpOnKVDB(op Op) {
 	kv.mu.Unlock()
 }
 
+// 根据requestId判断请求是否重复
 func (kv *KVServer) isRequestDuplicate(newClientId int64, newRequestId int) bool {
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
-	// return true if message is duplicate
+	// 如果message存在，返回true
 	lastRequestId, isClientInRecord := kv.lastRequestId[newClientId]
 	if !isClientInRecord {
 		return false

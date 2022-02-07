@@ -14,7 +14,7 @@ import "math/big"
 import "6.824/shardctrler"
 import "time"
 
-
+// 把key分配到处理它的分片上
 func key2shard(key string) int {
 	shard := 0
 	if len(key) > 0 {
@@ -73,9 +73,9 @@ func (ck *Clerk) Get(key string) string {
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
 		if servers, ok := ck.config.Groups[gid]; ok {
-			// try each server for the shard.
-			for si := 0; si < len(servers); si++ {
-				srv := ck.make_end(servers[si])
+			// 分片中的每个server
+			for i := 0; i < len(servers); i++ {
+				srv := ck.make_end(servers[i])
 				var reply GetReply
 				ok := srv.Call("ShardKV.Get", &args, &reply)
 				if ok && (reply.Err == OK || reply.Err == ErrNoKey) {
@@ -87,6 +87,7 @@ func (ck *Clerk) Get(key string) string {
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
+		// 询问controller最近的配置
 		ck.config = ck.sm.Query(-1)
 	}
 
@@ -103,6 +104,7 @@ func (ck *Clerk) PutAppend(key string, value string, opreation string) {
 		args := PutAppendArgs{Key:key,Opreation: opreation, Value: value,ClientId: ck.clientId, RequestId: ck.requestId, ConfigNum: ck.config.Num}
 		shard := key2shard(key)
 		gid := ck.config.Shards[shard]
+		// 分片中的每个server
 		if servers, ok := ck.config.Groups[gid]; ok {
 			for si := 0; si < len(servers); si++ {
 				srv := ck.make_end(servers[si])
@@ -118,6 +120,7 @@ func (ck *Clerk) PutAppend(key string, value string, opreation string) {
 			}
 		}
 		time.Sleep(100 * time.Millisecond)
+		// 询问controller最近的配置
 		ck.config = ck.sm.Query(-1)
 	}
 }

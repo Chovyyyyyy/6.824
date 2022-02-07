@@ -18,8 +18,7 @@ import (
 
 const (
 	Debug = false
-	//Debug = true
-	CONSENSUS_TIMEOUT = 450 // ms
+	CONSENSUS_TIMEOUT = 500 // ms
 )
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
@@ -99,8 +98,8 @@ func (kv *KVServer) Get(args *GetArgs, reply *GetReply) {
 	// timeout
 	select {
 	case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT) :
-		_,ifLeader := kv.rf.GetState()
-		if kv.isRequestDuplicate(op.ClientId, op.RequestId) && ifLeader{
+		_, isLeader := kv.rf.GetState()
+		if kv.isRequestDuplicate(op.ClientId, op.RequestId) && isLeader {
 			value, exist := kv.ExecuteGetOpOnKVDB(op)
 			if exist {
 				reply.Err = OK
@@ -141,7 +140,7 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 		reply.Err = ErrWrongLeader
 		return
 	}
-
+	// 判断是否为leader
 	_, ifLeader := kv.rf.GetState()
 	if !ifLeader {
 		reply.Err = ErrWrongLeader
@@ -151,9 +150,10 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 	op := Op{Operation: args.Opreation, Key: args.Key, Value: args.Value, ClientId: args.ClientId, RequestId: args.RequestId}
 
 	raftIndex, _, _ := kv.rf.Start(op)
-	// create waitForCh
+	// 创建 waitApplyChannel
 	kv.mu.Lock()
 	chForRaftIndex, exist := kv.waitApplyCh[raftIndex]
+	// 如果channel不存在则创建
 	if !exist {
 		kv.waitApplyCh[raftIndex] = make(chan Op, 1)
 		chForRaftIndex = kv.waitApplyCh[raftIndex]
@@ -162,13 +162,14 @@ func (kv *KVServer) PutAppend(args *PutAppendArgs, reply *PutAppendReply) {
 
 	select {
 		case <- time.After(time.Millisecond*CONSENSUS_TIMEOUT) :
+			// 如果超时了，需要先判断请求是否重复，如果请求重复则证明raft的状态改变了
 			if kv.isRequestDuplicate(op.ClientId,op.RequestId){
 				reply.Err = OK
 			} else{
 				reply.Err = ErrWrongLeader
 			}
-
 		case raftCommitOp := <- chForRaftIndex :
+			// 判断请求是否一致
 			if raftCommitOp.ClientId == op.ClientId && raftCommitOp.RequestId == op.RequestId  {
 				reply.Err = OK
 			}else{

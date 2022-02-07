@@ -3,35 +3,36 @@ package shardkv
 import "time"
 
 
-
+// PullNewConfigLoop 如果Config.Num大于自身，则提交一个NewConfigOp给Raft, 让大家在Raft Apply之后一起安装这个NewConfig,保证一致性
 func (kv *ShardKV) PullNewConfigLoop() {
 	for !kv.killed(){
 		kv.mu.Lock()
 		lastConfigNum := kv.config.Num
-		_,ifLeader := kv.rf.GetState()
+		_, isLeader := kv.rf.GetState()
 		kv.mu.Unlock()
 
-		if !ifLeader{
+		if !isLeader {
+			// 每隔配置检查超时时间间隔更新配置
 			time.Sleep(CONFIGCHECK_TIMEOUT*time.Millisecond)
 			continue
 		}
 
+		// 获取最新的Config
 		newestConfig := kv.mck.Query(lastConfigNum+1)
 		if newestConfig.Num == lastConfigNum+1 {
-			// Got a new Config
 			op := Op{Operation: NEWCONFIGOp, Config_NEWCONFIG: newestConfig}
 			kv.mu.Lock()
-			if _,ifLeader := kv.rf.GetState(); ifLeader{
+			if _, isLeader := kv.rf.GetState(); isLeader {
 				kv.rf.Start(op)
-				}
+			}
 			kv.mu.Unlock()
 		}
-
+		// 每隔配置检查超时时间间隔更新配置
 		time.Sleep(CONFIGCHECK_TIMEOUT*time.Millisecond)
 	}
 }
 
-
+// MigrateShard rpcHandler
 func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply) {
 	kv.mu.Lock()
 	myConfigNum := kv.config.Num
@@ -42,6 +43,7 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 		return
 	}
 
+	// 如果发送的ConfigNum落后了则不需要更新
 	if args.ConfigNum < myConfigNum {
 		reply.Err = OK
 		return
@@ -98,13 +100,14 @@ func (kv *ShardKV) MigrateShard(args *MigrateShardArgs, reply *MigrateShardReply
 }
 
 
+// SendShardToOtherGroupLoop 将分片发送到其他分组
 func (kv *ShardKV) SendShardToOtherGroupLoop() {
 	for !kv.killed(){
 		kv.mu.Lock()
-		_,ifLeader := kv.rf.GetState()
+		_, isLeader := kv.rf.GetState()
 		kv.mu.Unlock()
 
-		if !ifLeader{
+		if !isLeader {
 			time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 			continue
 		}
@@ -122,7 +125,7 @@ func (kv *ShardKV) SendShardToOtherGroupLoop() {
 			continue
 		}
 
-		ifNeedSend, sendData := kv.ifHaveSendData()
+		ifNeedSend, sendData := kv.isHaveSendData()
 		if !ifNeedSend{
 			time.Sleep(SENDSHARDS_TIMEOUT*time.Millisecond)
 			continue
@@ -132,7 +135,8 @@ func (kv *ShardKV) SendShardToOtherGroupLoop() {
 	}
 }
 
-func (kv *ShardKV) ifHaveSendData() (bool, map[int][]ShardComponent) {
+// isHaveSendData 是否有需要发送的数据
+func (kv *ShardKV) isHaveSendData() (bool, map[int][]ShardComponent) {
 	sendData := kv.MakeSendShardComponent()
 	if len(sendData) == 0 {
 		return false,make(map[int][]ShardComponent)
@@ -140,15 +144,18 @@ func (kv *ShardKV) ifHaveSendData() (bool, map[int][]ShardComponent) {
 	return true,sendData
 }
 
+// MakeSendShardComponent 制造需要发送的分片组件
 func (kv *ShardKV) MakeSendShardComponent()(map[int][]ShardComponent){
-	// kv.config already be update
+	// kv.config 已经被更新
 	kv.mu.Lock()
 	defer kv.mu.Unlock()
 	sendData := make(map[int][]ShardComponent)
 	for shard :=0;shard<NShards;shard++ {
 		nowOwner := kv.config.Shards[shard]
+		// 如果kv.gid不等于分片信息，并且分片正在迁移
 		if kv.migratingShard[shard] && kv.gid != nowOwner{
 			tempComponent := ShardComponent{ShardIndex: shard,KVDBOfShard: make(map[string]string),ClientRequestId: make(map[int64]int)}
+			// 将分片组件进行克隆
 			CloneSecondComponentIntoFirstExceptShardIndex(&tempComponent,kv.kvDB[shard])
 			sendData[nowOwner] = append(sendData[nowOwner],tempComponent)
 		}
@@ -156,6 +163,7 @@ func (kv *ShardKV) MakeSendShardComponent()(map[int][]ShardComponent){
 	return sendData
 }
 
+// sendShardComponent 发送分片组件
 func (kv *ShardKV) sendShardComponent(sendData map[int][]ShardComponent) {
 	for aimGid, ShardComponents := range sendData {
 		kv.mu.Lock()

@@ -21,8 +21,8 @@ type Err string
 
 type ShardComponent struct {
 	ShardIndex int
-	KVDBOfShard map[string]string
-	ClientRequestId map[int64]int
+	KVDBOfShard map[string]string // 每个分片的kvDataBase
+	ClientRequestId map[int64]int // 请求情况，方便去重
 }
 
 

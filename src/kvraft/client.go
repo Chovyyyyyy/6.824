@@ -7,11 +7,14 @@ import "crypto/rand"
 import "math/big"
 import mathrand "math/rand"
 
-
+// TODO 本实验要求你使用lab 2中的Raft库构建一个容错的Key/Value服务。
+// TODO 你的Key/Value服务应该是由几个使用Raft来维护复制的key/value服务器组成的一个复制状态机
+// TODO 尽管存在一些其他故障或网络分区，但只要大多数服务器还活着并可以通信，
+// TODO 你的key/value服务就应该继续处理客户端请求。
 type Clerk struct {
 	servers []*labrpc.ClientEnd
 	clientId int64
-	requestId int
+	requestId int // requestId为了确保线性一致性
 	recentLeaderId int
 }
 
@@ -51,7 +54,13 @@ func (ck *Clerk) SendGetToServer(key string, server int) string {
 	args := GetArgs{Key: key, ClientId: ck.clientId, RequestId: ck.requestId}
 	reply := GetReply{}
 	ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
-
+	//Clerk有时不知道哪个kvServer是Raft的领导者。
+	//如果Clerk将一个RPC发送到错误的kvServer，或者它无法到达kvServer，
+	//Clerk应该通过发送到一个不同的kvServer来重试。
+	//如果key/value服务器将操作提交到它的Raft日志(并因此将该操作应用到key/value状态机)，
+	//则领导者通过响应其RPC将结果报告给Clerk。
+	//如果操作未能提交(例如，如果领导者被替换)，服务器报告一个错误，
+	//并且Clerk用一个不同的服务器重试。
 	if !ok || reply.Err == ErrWrongLeader{
 		return ck.SendGetToServer(key,(server+1) % len(ck.servers))
 	}
@@ -65,7 +74,7 @@ func (ck *Clerk) SendGetToServer(key string, server int) string {
 }
 
 func (ck *Clerk) Get(key string) string {
-
+	// 线性一致性
 	ck.requestId++
 	requestId := ck.requestId
 	server := ck.recentLeaderId
@@ -74,14 +83,17 @@ func (ck *Clerk) Get(key string) string {
 	for {
 		reply := GetReply{}
 		ok := ck.servers[server].Call("KVServer.Get", &args, &reply)
+		// 判断请求是否成功以及raft节点是否是leader
 		if !ok || reply.Err == ErrWrongLeader{
 			server = (server+1)%len(ck.servers)
+			//time.Sleep(100 * time.Millisecond)
 			continue
 		}
 
 		if reply.Err == ErrNoKey {
 			return ""
 		}
+		// 如果reply是OK则更新recentLeaderId
 		if reply.Err == OK {
 			ck.recentLeaderId = server
 			return reply.Value
@@ -117,18 +129,21 @@ func (ck *Clerk) SendPutAppendToServer(key string,value string, opreation string
 }
 
 func (ck *Clerk) PutAppend(key string, value string, opreation string) {
+	// 线性一致性
 	ck.requestId++
 	requestId := ck.requestId
 	server := ck.recentLeaderId
 	for {
 		args := PutAppendArgs{Key: key, Value: value, Opreation : opreation, ClientId: ck.clientId, RequestId: requestId}
 		reply := PutAppendReply{}
-
 		ok := ck.servers[server].Call("KVServer.PutAppend", &args, &reply)
+		// 判断请求是否成功以及raft节点是否是leader
 		if !ok || reply.Err == ErrWrongLeader{
 			server = (server+1)%len(ck.servers)
+			//time.Sleep(100 * time.Millisecond)
 			continue
 		}
+		// 如果reply是OK则更新recentLeaderId
 		if reply.Err == OK {
 			ck.recentLeaderId = server
 			return
